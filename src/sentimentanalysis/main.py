@@ -4,27 +4,20 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# ---------------- LOAD DATA ----------------
-df = pd.read_csv("data/Combined_News_DJIA.csv")
-
-# start small for testing (increase later)
-df = df.sample(n=20, random_state=42)
-
-# get all headline columns
-text_columns = [col for col in df.columns if "Top" in col]
-
 # ---------------- CLEAN TEXT ----------------
 def clean_text(text):
-    text = re.sub(r"http\S+", "", str(text))          # remove URLs
-    text = re.sub(r"[^a-zA-Z0-9\s]", "", text)        # remove special characters
+    text = re.sub(r"http\S+", "", str(text))
+    text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
     return text.lower()
 
-# ---------------- LOAD FINBERT ----------------
+
+# ---------------- LOAD MODEL (load once) ----------------
 model_name = "ProsusAI/finbert"
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 model = AutoModelForSequenceClassification.from_pretrained(model_name)
 model.eval()
+
 
 # ---------------- SENTIMENT FUNCTION ----------------
 def get_sentiment_score(text):
@@ -33,7 +26,7 @@ def get_sentiment_score(text):
         return_tensors="pt",
         truncation=True,
         padding=True,
-        max_length=128   # shorter = faster
+        max_length=128
     )
 
     with torch.no_grad():
@@ -47,38 +40,48 @@ def get_sentiment_score(text):
 
     return (p_pos - p_neg) * confidence
 
-# ---------------- CALCULATE DAILY SENTIMENT ----------------
-daily_scores = []
 
-for i, row in df.iterrows():
-    scores = []
+# ✅ MAIN FUNCTION (IMPORTANT FOR YOU)
+def get_sentiment_data():
+    import os
 
-    for col in text_columns:
-        headline = row[col]
+    BASE_DIR = os.path.dirname(__file__)
+    file_path = os.path.join(BASE_DIR, "data", "Combined_News_DJIA.csv")
 
-        if pd.isna(headline):
-            continue
+    df = pd.read_csv(file_path)
 
-        headline = clean_text(headline)
-        headline = headline[:150]   # speed optimization
+    # small sample (you can remove later)
+    df = df.sample(n=20, random_state=42)
 
-        score = get_sentiment_score(headline)
-        scores.append(score)
+    text_columns = [col for col in df.columns if "Top" in col]
 
-    # average score for that day
-    if len(scores) > 0:
-        avg_score = sum(scores) / len(scores)
-    else:
-        avg_score = 0
+    daily_scores = []
 
-    daily_scores.append(avg_score)
+    for _, row in df.iterrows():
+        scores = []
 
-# ---------------- FINAL OUTPUT ----------------
-df["date"] = pd.to_datetime(df["Date"]).dt.date
-df["sentiment_score"] = daily_scores
+        for col in text_columns:
+            headline = row[col]
 
-result = df[["date", "sentiment_score"]]
+            if pd.isna(headline):
+                continue
 
-print(result.head())
+            headline = clean_text(headline)
+            headline = headline[:150]
 
-result.to_csv("daily_sentiment.csv", index=False)
+            score = get_sentiment_score(headline)
+            scores.append(score)
+
+        avg_score = sum(scores) / len(scores) if scores else 0
+        daily_scores.append(avg_score)
+
+    df["Date"] = pd.to_datetime(df["Date"])
+    df["sentiment_score"] = daily_scores
+
+    return df[["Date", "sentiment_score"]]
+
+
+# optional run for testing
+if __name__ == "__main__":
+    result = get_sentiment_data()
+    print(result.head())
