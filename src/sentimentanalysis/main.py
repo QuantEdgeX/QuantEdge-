@@ -1,87 +1,163 @@
+import yfinance as yf
 import pandas as pd
-import re
 import torch
-import torch.nn.functional as F
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# ---------------- CLEAN TEXT ----------------
-def clean_text(text):
-    text = re.sub(r"http\S+", "", str(text))
-    text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
-    return text.lower()
+from transformers import (
+    AutoTokenizer,
+    AutoModelForSequenceClassification
+)
 
+MODEL_NAME = "ProsusAI/finbert"
 
-# ---------------- LOAD MODEL (load once) ----------------
-model_name = "ProsusAI/finbert"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name)
-model.eval()
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
 
 
-# ---------------- SENTIMENT FUNCTION ----------------
-def get_sentiment_score(text):
+def analyze_sentiment(text):
+
     inputs = tokenizer(
         text,
         return_tensors="pt",
         truncation=True,
         padding=True,
-        max_length=128
+        max_length=512
     )
 
     with torch.no_grad():
         outputs = model(**inputs)
 
-    probs = F.softmax(outputs.logits, dim=1)
+    probs = torch.nn.functional.softmax(
+        outputs.logits,
+        dim=-1
+    )
 
-    p_pos = probs[0][0].item()
-    p_neg = probs[0][1].item()
-    confidence = probs.max().item()
+    positive = probs[0][0].item()
+    negative = probs[0][1].item()
+    neutral = probs[0][2].item()
 
-    return (p_pos - p_neg) * confidence
+    score = positive - negative
 
+    if score > 0.2:
+        sentiment = "Bullish"
 
-# ✅ MAIN FUNCTION (IMPORTANT FOR YOU)
-def get_sentiment_data():
-    import os
+    elif score < -0.2:
+        sentiment = "Bearish"
 
-    BASE_DIR = os.path.dirname(__file__)
-    file_path = os.path.join(BASE_DIR, "data", "Combined_News_DJIA.csv")
+    else:
+        sentiment = "Neutral"
 
-    df = pd.read_csv(file_path)
-
-    # small sample (you can remove later)
-    df = df.sample(n=20, random_state=42)
-
-    text_columns = [col for col in df.columns if "Top" in col]
-
-    daily_scores = []
-
-    for _, row in df.iterrows():
-        scores = []
-
-        for col in text_columns:
-            headline = row[col]
-
-            if pd.isna(headline):
-                continue
-
-            headline = clean_text(headline)
-            headline = headline[:150]
-
-            score = get_sentiment_score(headline)
-            scores.append(score)
-
-        avg_score = sum(scores) / len(scores) if scores else 0
-        daily_scores.append(avg_score)
-
-    df["Date"] = pd.to_datetime(df["Date"])
-    df["sentiment_score"] = daily_scores
-
-    return df[["Date", "sentiment_score"]]
+    return {
+        "positive": positive,
+        "negative": negative,
+        "neutral": neutral,
+        "score": score,
+        "sentiment": sentiment
+    }
 
 
-# optional run for testing
-if __name__ == "__main__":
-    result = get_sentiment_data()
-    print(result.head())
+trusted_sources = [
+    "Reuters",
+    "Bloomberg",
+    "CNBC",
+    "Yahoo Finance",
+    "MarketWatch",
+    "The Wall Street Journal",
+    "Barrons"
+]
+
+
+ticker = input("Enter stock ticker: ").upper()
+
+stock = yf.Ticker(ticker)
+
+news = stock.news
+
+
+results = []
+
+scores = []
+
+
+for item in news:
+
+    try:
+
+        content = item['content']
+
+        headline = content['title']
+
+        source = content['provider']['displayName']
+
+        timestamp = content['pubDate']
+
+
+        # Filter trusted sources only
+        # if source not in trusted_sources:
+        #     continue
+
+
+        # Sentiment analysis
+        result = analyze_sentiment(headline)
+
+        score = result['score']
+
+        scores.append(score)
+
+
+        results.append({
+
+            "headline": headline,
+
+            "source": source,
+
+            "timestamp": timestamp,
+
+            "positive": result['positive'],
+
+            "negative": result['negative'],
+
+            "neutral": result['neutral'],
+
+            "score": score,
+
+            "sentiment": result['sentiment']
+        })
+
+    except:
+        pass
+
+
+if len(scores) == 0:
+
+    print("No trusted news headlines found.")
+
+    exit()
+
+
+avg_sentiment = sum(scores) / len(scores)
+
+
+if avg_sentiment > 0.2:
+    mood = "Bullish"
+
+elif avg_sentiment < -0.2:
+    mood = "Bearish"
+
+else:
+    mood = "Neutral"
+
+
+results_df = pd.DataFrame(results)
+
+
+print("\n========== FINAL RESULT ==========")
+
+print("Stock:", ticker)
+
+print("Total Headlines:", len(results))
+
+print("Sentiment Score:", round(avg_sentiment, 3))
+
+print("Market Mood:", mood)
+
