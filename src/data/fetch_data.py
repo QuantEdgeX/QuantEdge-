@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 
-def fetch_stock_data(tickers, start="2020-01-01", end="2024-01-01"):
+def fetch_stock_data(tickers, start="2020-01-01", end=None):
     all_data = []
 
     for ticker in tickers:
