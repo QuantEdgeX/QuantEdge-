@@ -30,3 +30,4 @@ if __name__ == "__main__":
     data.to_csv("src/data/stock_data.csv", index=False)
 
     print("Multi-stock data saved!")
+    

@@ -4,6 +4,7 @@ __pycache__/
 
 # Virtual environment
 venv/
+lstm_venv/
 .env
 
 # Data files
@@ -26,3 +27,6 @@ Thumbs.db
 # Navya files
 toremember.txt
 *.pkl
+
+# Trained ML models
+*.keras
