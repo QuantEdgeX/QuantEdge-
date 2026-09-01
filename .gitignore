@@ -6,6 +6,9 @@ __pycache__/
 venv/
 lstm_venv/
 .env
+.venv/
+
+
 
 # Data files
 data/*.csv

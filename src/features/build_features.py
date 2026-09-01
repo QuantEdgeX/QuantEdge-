@@ -42,6 +42,21 @@ def create_features(df, sentiment_df):
         df.groupby("Ticker")["Close"]
         .pct_change()
     )
+    # -----------------------------------
+    # MOMENTUM
+    # -----------------------------------
+
+    df["Return_3D"] = (
+        df.groupby("Ticker")["Close"].pct_change(3)
+    )
+
+    df["Return_5D"] = (
+        df.groupby("Ticker")["Close"].pct_change(5)
+    )
+
+    df["Return_10D"] = (
+        df.groupby("Ticker")["Close"].pct_change(10)
+    )
 
     # -----------------------------------
     # MOVING AVERAGES
@@ -196,13 +211,26 @@ def create_features(df, sentiment_df):
         df.groupby("Ticker")["Volume"]
         .pct_change()
     )
+    # -----------------------------------
+    # VOLUME RATIO
+    # -----------------------------------
 
+    df["Volume_MA5"] = (
+        df.groupby("Ticker")["Volume"]
+        .transform(
+            lambda x: x.rolling(5).mean()
+        )
+    )
+
+    df["Volume_Ratio"] = (
+        df["Volume"] / df["Volume_MA5"]
+    )
     # -----------------------------------
     # FUTURE RETURN
     # -----------------------------------
 
     df["Future_Return"] = (
-        df.groupby("Ticker")["Close"].shift(-1)
+        df.groupby("Ticker")["Close"].shift(-5)
         / df["Close"]
     ) - 1
 
@@ -210,21 +238,21 @@ def create_features(df, sentiment_df):
     # LABEL
     # -----------------------------------
 
-    def label(x):
+    # def label(x):
 
-        if x > 0.003:
-            return "BUY"
+    #     if x > 0.003:
+    #         return "BUY"
 
-        elif x < -0.003:
-            return "SELL"
+    #     elif x < -0.003:
+    #         return "SELL"
 
-        else:
-            return "HOLD"
+    #     else:
+    #         return "HOLD"
 
-    df["Decision"] = (
-        df["Future_Return"]
-        .apply(label)
-    )
+    # df["Decision"] = (
+    #     df["Future_Return"]
+    #     .apply(label)
+    # )
 
     # -----------------------------------
     # REMOVE INVALID ROWS

@@ -1,0 +1,2 @@
+buy_threshold,sell_threshold,validation_accuracy,validation_macro_f1,test_accuracy,test_macro_f1
+0.3125,0.375,0.39299886621315194,0.36013456485770545,0.40202702702702703,0.3588333537697714
