@@ -125,12 +125,15 @@ class QuizProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data =
-          await LearningEngineService.fetchQuestion(userId: 'user_demo_123');
+      final data = await LearningEngineService.fetchQuestion(
+        userId: 'user_demo_123',
+        xaiLevel: _userLevel,
+      );
 
       if (data != null) {
-        _activeSession = data['session'] ?? data;
-        _currentQuestion = data['question'];
+        // New FastAPI response shape: sessionId, userId, question, sessionStatus
+        _activeSession = data;
+        _currentQuestion = data['question'] as Map<String, dynamic>?;
       }
     } catch (e) {
       debugPrint('Error initializing quiz session: $e');
@@ -156,28 +159,34 @@ class QuizProvider extends ChangeNotifier {
       final response = await LearningEngineService.evaluateLevel(
         session: _activeSession!,
         selectedOptionId: optionId,
+        questionId: _currentQuestion!['questionId'] as String,
+        userId: 'user_demo_123',
       );
 
       if (response != null) {
-        _activeSession = response['session'];
-        final questions = _activeSession?['state']?['questions'] as List?;
-        final currentIndex =
-            _activeSession?['state']?['currentIndex'] as int? ?? 0;
-        final status = _activeSession?['state']?['status'] as String?;
+        // Backend returns: sessionId, answer, sessionDelta, nextQuestion,
+        // sessionStatus, completionSummary, session.state
+        final status = response['sessionStatus'] as String? ?? '';
+        final nextQ  = response['nextQuestion'] as Map<String, dynamic>?;
+        final summary = response['completionSummary'] as Map<String, dynamic>?;
 
-        if (status == 'completed' ||
-            questions == null ||
-            currentIndex >= questions.length) {
-          _completionSummary = response;
-          if (response['currentLevel'] != null) {
-            _userLevel =
-                _parseSkillLevelToNumeric(response['currentLevel'].toString());
+        // Update stored session with latest state
+        _activeSession = response;
+
+        if (status == 'COMPLETED' || (summary != null)) {
+          _completionSummary = summary;
+          if (summary?['currentLevel'] != null) {
+            _userLevel = _parseSkillLevelToNumeric(summary!['currentLevel'].toString());
           }
           _currentQuestion = null;
           setPhase(AppPhase.onboarding2);
-        } else {
-          _currentQuestion = questions[currentIndex] as Map<String, dynamic>?;
+        } else if (nextQ != null) {
+          _currentQuestion = nextQ;
           _selectedQuizOption = null;
+        } else {
+          // Fallback: advance phase if no next question
+          _currentQuestion = null;
+          setPhase(AppPhase.onboarding2);
         }
       }
     } catch (e) {
@@ -358,51 +367,52 @@ class QuizProvider extends ChangeNotifier {
 
   Future<String> fetchXaiInsightForAsset(MarketAsset asset) async {
     try {
+      // Use real RSI from asset (populated from live yfinance data)
+      final double rsi = asset.rsi;
+      final double sentiment = asset.numericSentiment;
+
       final response = await http.post(
-        Uri.parse('${LearningEngineService.baseUrl}/xai-explain'),
+        Uri.parse('${LearningEngineService.baseUrl}/api/learning/xai/explain'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
-          'sessionId':
-              _activeSession?['state']?['sessionId'] ?? 'dashboard-session',
           'ticker': asset.ticker,
-          'rsi': 55.0,
-          'finbertScore': asset.numericSentiment,
-          'isCorrect': true,
-          'hintsUsed': 0,
-          'domain': 'technical-analysis',
-          'skillLevel': skillLevel,
+          'decision': asset.status.toUpperCase(),
+          'features': {
+            'rsi': rsi,
+            'ma5': 0.0,
+            'ma10': 0.0,
+            'volatility': 0.015,
+            'sentimentScore': sentiment,
+            'marketMood': sentiment > 0.1 ? 'Bullish' : (sentiment < -0.1 ? 'Bearish' : 'Neutral'),
+            'confidence': double.tryParse(asset.confidence.replaceAll('%', '')) != null
+                ? (double.parse(asset.confidence.replaceAll('%', '')) / 100)
+                : 0.70,
+          },
+          'xaiLevel': _userLevel,
         }),
-      );
+      ).timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if (data['summary'] != null && data['summary'].toString().isNotEmpty) {
-          return data['summary'];
-        }
+        // Backend returns `summary` field
+        final text = data['summary'] ?? data['detailedExplanation'] ?? '';
+        if (text.toString().isNotEmpty) return text.toString();
       }
     } catch (e) {
-      debugPrint('Error fetching dynamic XAI insight: $e');
+      debugPrint('Error fetching XAI insight: $e');
     }
 
-    // 1. First fallback: Use the explicit insight provided by the asset object
-    if (asset.insight.isNotEmpty) {
-      return asset.insight;
-    }
+    // Fallback 1: asset insight from backend
+    if (asset.insight.isNotEmpty) return asset.insight;
 
-    // 2. Second fallback: Dynamic level-appropriate summary tailored to the asset's status & sentiment
+    // Fallback 2: level-appropriate static summary
     final status = asset.status.toUpperCase();
     final sentiment = asset.numericSentiment;
-
     if (_userLevel <= 2) {
-      if (status == 'BUY') {
-        return 'Strong buying pressure for ${asset.ticker}. Sentiment score sits at +$sentiment with high confidence.';
-      } else if (status == 'SELL') {
-        return 'Increased selling activity detected in ${asset.ticker}. Sentiment has dipped to $sentiment.';
-      } else {
-        return '${asset.ticker} is trading in a neutral range with a $sentiment sentiment score. Recommendation is to hold.';
-      }
+      if (status == 'BUY')  return 'Strong buying pressure for ${asset.ticker}. Sentiment score sits at +$sentiment with high confidence.';
+      if (status == 'SELL') return 'Increased selling activity detected in ${asset.ticker}. Sentiment has dipped to $sentiment.';
+      return '${asset.ticker} is trading in a neutral range with a $sentiment sentiment score. Recommendation is to hold.';
     }
-
-    return '${asset.ticker} shows a confidence level of ${asset.confidence} driven by institutional order flows and factor alignment.';
+    return '${asset.ticker} shows a confidence level of ${asset.confidence} driven by technical and sentiment factor alignment.';
   }
 }

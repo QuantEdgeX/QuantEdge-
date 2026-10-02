@@ -43,7 +43,7 @@ class OnboardingQuizScreen extends StatelessWidget {
     final String domainText =
         (question['domain'] ?? 'TECHNICAL ANALYSIS').toString().toUpperCase();
     final String promptText = question['prompt'] ?? '';
-    final List choicesList = (question['choices'] as List?) ?? [];
+    final List choicesList = (question['options'] as List?) ?? [];
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
@@ -136,6 +136,16 @@ class OnboardingQuizScreen extends StatelessWidget {
                         color: isDark
                             ? Colors.white70
                             : AppColors.lightTextSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      (question['contextBlurb'] ?? '').toString(),
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                        height: 1.4,
+                        color: textColor,
                       ),
                     ),
                     const SizedBox(height: 20),

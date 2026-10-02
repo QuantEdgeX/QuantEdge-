@@ -7,6 +7,9 @@ class MarketAsset {
   final String confidence;
   final String sentiment;
   final String insight;
+  final double rsi;
+  final double price;
+  final double changePercent;
 
   MarketAsset({
     required this.ticker,
@@ -14,6 +17,9 @@ class MarketAsset {
     required this.confidence,
     required this.sentiment,
     required this.insight,
+    this.rsi = 50.0,
+    this.price = 0.0,
+    this.changePercent = 0.0,
   });
 
   factory MarketAsset.fromJson(Map<String, dynamic> json) {
@@ -23,6 +29,9 @@ class MarketAsset {
       confidence: json['confidence'] ?? '0%',
       sentiment: json['sentiment'] ?? '0.00',
       insight: json['insight'] ?? '',
+      rsi: (json['rsi'] as num?)?.toDouble() ?? 50.0,
+      price: (json['price'] as num?)?.toDouble() ?? 0.0,
+      changePercent: (json['changePercent'] as num?)?.toDouble() ?? 0.0,
     );
   }
 

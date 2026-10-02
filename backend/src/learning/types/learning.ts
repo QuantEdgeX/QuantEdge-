@@ -13,16 +13,17 @@
 
 // ─── User Level Tiers ────────────────────────────────────────────────────────
 
-export type XaiLevel = 1 | 2 | 3 | 4;
+export type XaiLevel = 1 | 2 | 3 | 4 | 5;
 
 /** Maps 1-to-1 with XaiLevel; stored as string in Firestore. */
-export type LevelTier = 'novice' | 'beginner' | 'intermediate' | 'quant';
+export type LevelTier = 'novice' | 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
 export const LEVEL_TIER_MAP: Record<XaiLevel, LevelTier> = {
   1: 'novice',
   2: 'beginner',
   3: 'intermediate',
-  4: 'quant',
+  4: 'advanced',
+  5: 'expert',
 };
 
 // ─── Score Vectors ─────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ export interface SubmittedAnswer {
 
 // ─── XAI Explanation ─────────────────────────────────────────────────────────
 
-export type ExplanationDepth = 'simple' | 'standard' | 'detailed' | 'quant';
+export type ExplanationDepth = 'novice' | 'beginner' | 'intermediate' | 'advanced' | 'expert';
 
 export interface XaiExplainRequest {
   ticker: string;
