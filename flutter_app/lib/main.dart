@@ -1,17 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import 'theme/app_theme.dart';
-import 'providers/quiz_provider.dart';
-import 'screens/onboarding_quiz_screen.dart';
-import 'screens/onboarding_glossary_screen.dart';
-import 'screens/level_celebration_screen.dart';
+// Both provider files declare an `AppTab` enum, so import only the
+// provider classes from here to avoid an "ambiguous import" error.
+import 'providers/learning_provider.dart' show LearningProvider;
+import 'providers/quiz_provider.dart' show QuizProvider;
 import 'screens/main_workspace_screen.dart';
+import 'screens/onboarding_quiz_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => QuizProvider(),
+    MultiProvider(
+      providers: [
+        // Single LearningProvider. It checks onboarding status as soon as
+        // the app starts.
+        ChangeNotifierProvider(
+          create: (_) => LearningProvider()..checkOnboardingStatus(),
+        ),
+        // Needed by DashboardTab, PortfolioTab and AssistantTab. Without
+        // it they throw "Could not find the correct Provider<QuizProvider>".
+        ChangeNotifierProvider(
+          create: (_) => QuizProvider(),
+        ),
+      ],
       child: const QuantEdgeApp(),
     ),
   );
@@ -22,14 +36,17 @@ class QuantEdgeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<QuizProvider>();
+    // QuizProvider owns the dark-mode flag (toggled from the header button).
+    final isDarkMode = context.select<QuizProvider, bool>(
+      (provider) => provider.isDarkMode,
+    );
 
     return MaterialApp(
       title: 'QuantEdge',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
-      themeMode: provider.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+      themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
       home: const MobileAppContainer(),
     );
   }
@@ -40,8 +57,28 @@ class MobileAppContainer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final quizProvider = context.watch<QuizProvider>();
-    final isDark = quizProvider.isDarkMode;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // Fallback level from QuizProvider (used until the learning score loads).
+    final userLevel = context.select<QuizProvider, int>(
+      (provider) => provider.userLevel,
+    );
+
+    // Onboarding state + the learner's real score.
+    final onboardingChecked = context.select<LearningProvider, bool>(
+      (p) => p.onboardingChecked,
+    );
+    final needsOnboarding = context.select<LearningProvider, bool>(
+      (p) => p.needsOnboarding,
+    );
+    final learnScore = context.select<LearningProvider, int?>(
+      (p) => p.progress?.score,
+    );
+
+    // Live level shown in the header chip (backend score 1-10 -> level 1-5).
+    final xaiLevel = (learnScore != null && learnScore > 0)
+        ? ((learnScore + 1) ~/ 2).clamp(1, 5).toInt()
+        : userLevel;
 
     return Scaffold(
       backgroundColor: isDark
@@ -49,12 +86,17 @@ class MobileAppContainer extends StatelessWidget {
           : const Color(0xFFEAE8E0),
       body: Center(
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 430, maxHeight: 890),
+          constraints: const BoxConstraints(
+            maxWidth: 430,
+            maxHeight: 890,
+          ),
           decoration: BoxDecoration(
             color: isDark ? AppColors.darkBg : AppColors.lightBg,
             borderRadius: BorderRadius.circular(44),
             border: Border.all(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark
+                  ? const Color(0xFF1E293B)
+                  : Colors.white,
               width: 8,
             ),
             boxShadow: [
@@ -76,90 +118,90 @@ class MobileAppContainer extends StatelessWidget {
                       vertical: 12,
                     ),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment:
+                          MainAxisAlignment.spaceBetween,
                       children: [
-                        if (quizProvider.phase == AppPhase.mainApp)
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'QUANTEDGE',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  fontStyle: FontStyle.italic,
-                                  letterSpacing: 2.0,
-                                  fontSize: 16,
-                                  color: isDark
-                                      ? Colors.white
-                                      : AppColors.lightTextPrimary,
-                                ),
+                        Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'QUANTEDGE',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontStyle: FontStyle.italic,
+                                letterSpacing: 2.0,
+                                fontSize: 16,
+                                color: isDark
+                                    ? Colors.white
+                                    : AppColors.lightTextPrimary,
                               ),
-                              const Text(
-                                'ALPHA ENGINE',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: 3.0,
-                                  color: AppColors.emerald,
-                                ),
+                            ),
+                            const Text(
+                              'ALPHA ENGINE',
+                              style: TextStyle(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 3.0,
+                                color: AppColors.emerald,
                               ),
-                            ],
-                          )
-                        else
-                          const SizedBox.shrink(),
+                            ),
+                          ],
+                        ),
                         Row(
                           children: [
-                            if (quizProvider.phase == AppPhase.mainApp) ...[
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 6,
-                                ),
-                                decoration: BoxDecoration(
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? const Color(0xFF1E293B)
+                                    : Colors.white,
+                                borderRadius:
+                                    BorderRadius.circular(12),
+                                border: Border.all(
                                   color: isDark
-                                      ? const Color(0xFF1E293B)
-                                      : Colors.white,
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(
-                                    color: isDark
-                                        ? Colors.white10
-                                        : AppColors.lightBorder,
-                                  ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    Text(
-                                      'XAI LEVEL: ${quizProvider.userLevel}',
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.w900,
-                                        color: isDark
-                                            ? Colors.white70
-                                            : AppColors.lightTextPrimary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Container(
-                                      width: 6,
-                                      height: 6,
-                                      decoration: const BoxDecoration(
-                                        color: AppColors.emerald,
-                                        shape: BoxShape.circle,
-                                      ),
-                                    ),
-                                  ],
+                                      ? Colors.white10
+                                      : AppColors.lightBorder,
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                            ],
+                              child: Row(
+                                children: [
+                                  Text(
+                                    'XAI LEVEL: $xaiLevel',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      color: isDark
+                                          ? Colors.white70
+                                          : AppColors.lightTextPrimary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    width: 6,
+                                    height: 6,
+                                    decoration: const BoxDecoration(
+                                      color: AppColors.emerald,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
                             IconButton(
-                              onPressed: () => quizProvider.toggleTheme(),
+                              onPressed: () =>
+                                  context.read<QuizProvider>().toggleTheme(),
                               style: IconButton.styleFrom(
                                 backgroundColor: isDark
                                     ? Colors.white.withOpacity(0.08)
                                     : Colors.white,
                                 shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
+                                  borderRadius:
+                                      BorderRadius.circular(14),
                                   side: BorderSide(
                                     color: isDark
                                         ? Colors.white10
@@ -181,10 +223,15 @@ class MobileAppContainer extends StatelessWidget {
                     ),
                   ),
                   Expanded(
-                    child: AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 300),
-                      child: _buildPhase(quizProvider.phase),
-                    ),
+                    child: !onboardingChecked
+                        ? const Center(
+                            child: CircularProgressIndicator(
+                              color: AppColors.emerald,
+                            ),
+                          )
+                        : needsOnboarding
+                            ? const OnboardingQuizScreen()
+                            : const MainWorkspaceScreen(),
                   ),
                 ],
               ),
@@ -193,18 +240,5 @@ class MobileAppContainer extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  Widget _buildPhase(AppPhase phase) {
-    switch (phase) {
-      case AppPhase.onboarding1:
-        return const OnboardingQuizScreen();
-      case AppPhase.onboarding2:
-        return const OnboardingGlossaryScreen();
-      case AppPhase.assessmentComplete:
-        return const LevelCelebrationScreen();
-      case AppPhase.mainApp:
-        return const MainWorkspaceScreen();
-    }
   }
 }

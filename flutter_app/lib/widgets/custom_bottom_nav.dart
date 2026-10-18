@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/quiz_provider.dart';
+
+import '../providers/learning_provider.dart';
 import '../theme/app_theme.dart';
 
 class CustomBottomNavBar extends StatelessWidget {
@@ -8,93 +9,164 @@ class CustomBottomNavBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final quizProvider = context.watch<QuizProvider>();
-    final isDark = quizProvider.isDarkMode;
+    final learningProvider = context.watch<LearningProvider>();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final navItems = [
-      {
-        'tab': AppTab.dashboard,
-        'label': 'Dashboard',
-        'icon': AppIcons.layoutDashboard,
-      },
-      {
-        'tab': AppTab.quiz,
-        'label': 'Quiz',
-        'icon': Icons.quiz,
-      },
-      {
-        'tab': AppTab.portfolio,
-        'label': 'Portfolio',
-        'icon': AppIcons.briefcase,
-      },
-      {
-        'tab': AppTab.assistant,
-        'label': 'Assistant',
-        'icon': AppIcons.messageSquare,
-      },
+      const _NavItem(
+        tab: AppTab.dashboard,
+        label: 'Home',
+        icon: AppIcons.layoutDashboard,
+      ),
+      const _NavItem(
+        tab: AppTab.learning,
+        label: 'Learn',
+        icon: Icons.school_outlined,
+      ),
+      const _NavItem(
+        tab: AppTab.portfolio,
+        label: 'Portfolio',
+        icon: AppIcons.briefcase,
+      ),
+      const _NavItem(
+        tab: AppTab.assistant,
+        label: 'AI',
+        icon: AppIcons.messageSquare,
+      ),
     ];
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      height: 64,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: isDark ? AppColors.darkSurface : Colors.white,
         borderRadius: BorderRadius.circular(32),
         border: Border.all(
-          color: isDark ? Colors.white12 : AppColors.lightBorder,
-          width: 2,
+          color: isDark ? Colors.white10 : AppColors.lightBorder,
+          width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            color: Colors.black.withOpacity(0.10),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: navItems.map((item) {
-          final tab = item['tab'] as AppTab;
-          final isSelected = quizProvider.currentTab == tab;
+          final isSelected = learningProvider.currentTab == item.tab;
 
-          return GestureDetector(
-            onTap: () => quizProvider.setTab(tab),
-            behavior: HitTestBehavior.opaque,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected
-                    ? AppColors.emerald.withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    item['icon'] as IconData,
-                    size: 20,
-                    color: isSelected
-                        ? AppColors.emerald
-                        : (isDark ? Colors.white54 : AppColors.lightTextMuted),
-                  ),
-                  if (isSelected) ...[
-                    const SizedBox(width: 8),
-                    Text(
-                      item['label'] as String,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.emerald,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
+          return Expanded(
+            child: _NavButton(
+              item: item,
+              isSelected: isSelected,
+              isDark: isDark,
+              onTap: () => learningProvider.setTab(item.tab),
             ),
           );
         }).toList(),
       ),
     );
   }
+}
+
+class _NavButton extends StatelessWidget {
+  final _NavItem item;
+  final bool isSelected;
+  final bool isDark;
+  final VoidCallback onTap;
+
+  const _NavButton({
+    required this.item,
+    required this.isSelected,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        margin: const EdgeInsets.symmetric(horizontal: 2),
+        padding: EdgeInsets.symmetric(
+          horizontal: isSelected ? 8 : 2,
+          vertical: 4,
+        ),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.emerald.withOpacity(0.13)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: AnimatedScale(
+          scale: isSelected ? 1.0 : 0.96,
+          duration: const Duration(milliseconds: 180),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                width: isSelected ? 30 : 24,
+                height: isSelected ? 24 : 20,
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppColors.emerald.withOpacity(0.16)
+                      : Colors.transparent,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  item.icon,
+                  size: isSelected ? 18 : 17,
+                  color: isSelected
+                      ? AppColors.emerald
+                      : (isDark
+                          ? Colors.white54
+                          : AppColors.lightTextMuted),
+                ),
+              ),
+              const SizedBox(height: 1),
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 180),
+                style: TextStyle(
+                  fontSize: isSelected ? 9.5 : 8.5,
+                  fontWeight:
+                      isSelected ? FontWeight.w900 : FontWeight.w600,
+                  color: isSelected
+                      ? AppColors.emerald
+                      : (isDark
+                          ? Colors.white54
+                          : AppColors.lightTextMuted),
+                ),
+                child: Text(
+                  item.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NavItem {
+  final AppTab tab;
+  final String label;
+  final IconData icon;
+
+  const _NavItem({
+    required this.tab,
+    required this.label,
+    required this.icon,
+  });
 }

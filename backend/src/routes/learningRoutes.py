@@ -1,567 +1,2368 @@
 """
-QuantEdge Learning Engine - FastAPI Route Layer v2.0
-=====================================================
-POST /api/learning/quiz/init    - Adaptive quiz session init
-POST /api/learning/quiz/submit  - Submit answer, branch Q2/Q3
-POST /api/learning/xai/explain  - Gemini XAI explanation (5 levels)
-GET  /api/dashboard             - Dashboard metrics (snake_case)
-GET  /api/assets                - Live yfinance market assets
-GET  /api/portfolio             - Flat portfolio holdings list
-GET  /api/factors               - Factor impact breakdown
-POST /api/assistant             - Gemini educational assistant (5 levels)
+QuantEdge Learning Engine
+=========================
 
-uvicorn src.routes.learningRoutes:app --reload --port 8000
-"""
+Duolingo-style stock market learning system.
+
+Learning flow:
+
+    User -> current score -> current topic -> difficulty
+    -> lesson plan (10 questions, each with its own subtopic / style / angle)
+    -> Groq generates each question (deduplicated against history)
+    -> user answers -> backend validates
+    -> 10 questions completed
+    -> score >= 80% ?
+    YES -> topic completed, score +1, next topic unlocked
+    NO  -> retry same topic with BRAND NEW questions
+
+    What makes questions fresh and good:
+
+        * Per-user, per-topic question history is persisted. Every question ever
+        served is remembered, so a retake never repeats an earlier question.
+        * Every lesson gets a randomized plan: subtopics are rotated so all of them
+        are covered, each question gets a different style (concept, scenario,
+        calculation, chart, comparison) and a different angle (misconception,
+        cause and effect, spot-the-mistake, ...).
+        * Difficulty ramps inside a lesson (warm-up -> core -> challenge) and the
+        base difficulty comes from the learner's score.
+        * Questions the learner gets wrong are re-tested later in the same lesson
+        on that subtopic with a different question (Duolingo-style reinforcement).
+        * Generated questions are validated, near-duplicates are rejected and
+        regenerated, and answer options are shuffled server-side so the correct
+        answer is not always "A".
+        * The correct answer is NEVER sent to the Flutter client. It is stored only
+        inside the backend lesson session.
+
+        Main learning endpoints (unchanged):
+
+            POST /api/learning/lesson/start
+            POST /api/learning/lesson/answer
+            GET  /api/learning/progress
+            GET  /api/learning/topics
+            """
 
 from __future__ import annotations
-from dotenv import load_dotenv
-load_dotenv()
 
-import os, uuid, random, logging, asyncio, time
-from datetime import datetime, timezone
+import asyncio
+import json
+import logging
+import os
+import random
+import re
+import time
+import uuid
+from datetime import date, datetime, timezone
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from google import genai
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+load_dotenv()
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("quantedge.learning")
 
-app = FastAPI(title="QuantEdge Learning API", version="2.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
-                   allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(
+    title="QuantEdge Learning API",
+    version="3.1.0",
+    description="Duolingo-style adaptive stock market learning engine.",
+)
 
-_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
-_gemini_client = genai.Client(api_key=_GEMINI_KEY) if _GEMINI_KEY else None
-if not _GEMINI_KEY:
-    logger.warning("GEMINI_API_KEY not set - using deterministic fallback.")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-_SESSION_STORE: Dict[str, Dict[str, Any]] = {}
-
-# --------------------------------------------------------------------------
-# 5-Level XAI Configuration
-# 1=novice  2=beginner  3=intermediate  4=advanced  5=expert
-# --------------------------------------------------------------------------
-_LEVEL_MAP: Dict[int, str] = {1:"novice",2:"beginner",3:"intermediate",4:"advanced",5:"expert"}
-
-_LEVEL_CONFIG: Dict[str, Dict[str, Any]] = {
-    "novice": {
-        "label": "Novice",
-        "features_shown": ["decision", "market_mood"],
-        "word_limit": 40,
-        "prompt": (
-            "Explain in 1-2 very simple sentences for someone who has never invested. "
-            "Use everyday analogies. Avoid ALL jargon. Focus on the buy/sell result and overall mood."
-        ),
-    },
-    "beginner": {
-        "label": "Beginner",
-        "features_shown": ["decision", "market_mood", "sentiment_score"],
-        "word_limit": 60,
-        "prompt": (
-            "Explain in 2-3 sentences for someone with very basic finance knowledge. "
-            "Briefly define any term you use. Mention the sentiment score simply."
-        ),
-    },
-    "intermediate": {
-        "label": "Intermediate",
-        "features_shown": ["decision", "rsi", "sentiment_score", "market_mood"],
-        "word_limit": 80,
-        "prompt": (
-            "Explain in 3-4 sentences for someone with standard finance knowledge. "
-            "Reference RSI and FinBERT sentiment score by name without re-defining them."
-        ),
-    },
-    "advanced": {
-        "label": "Advanced",
-        "features_shown": ["decision","rsi","ma5","ma10","sentiment_score","volatility","confidence"],
-        "word_limit": 100,
-        "prompt": (
-            "Paragraph-length explanation referencing RSI, MA5/MA10 crossovers, 5-day volatility, "
-            "FinBERT sentiment pipeline, and model confidence. Note any price-sentiment divergence."
-        ),
-    },
-    "expert": {
-        "label": "Expert / Quant",
-        "features_shown": ["decision","rsi","ma5","ma10","sentiment_score","volatility","confidence","shap"],
-        "word_limit": 130,
-        "prompt": (
-            "Quant-level: SHAP feature contributions, alpha decay risk from price-sentiment divergence, "
-            "volatility regime, and confidence interval risk. Dense technical language for quant analysts."
-        ),
-    },
-}
-
-# --------------------------------------------------------------------------
-# Question Bank (9 questions across 3 tiers, adaptive branching)
-# --------------------------------------------------------------------------
-_QUESTION_BANK: List[Dict[str, Any]] = [
-    # TIER 1
-    {"questionId":"q_scen_001","type":"SCENARIO","tier":1,"position":0,
-     "prompt":"Case Study: Market Divergence",
-     "contextBlurb":"NVDA price is climbing rapidly but social sentiment has plummeted into panic. What do you do?",
-     "options":[{"id":"A","text":"Chase the momentum rally immediately."},
-                {"id":"B","text":"Liquidate all holdings to avoid the crash."},
-                {"id":"C","text":"Pause and evaluate whether price and sentiment are out of sync."}],
-     "correctOptionId":"C","scoreDimension":"sentiment","pointValue":10,"penalty":-3},
-
-    {"questionId":"q_tech_001","type":"TECHNICAL","tier":1,"position":1,
-     "prompt":"RSI Reading",
-     "contextBlurb":"AAPL's RSI just crossed above 70 while its 5-day MA is still rising.",
-     "options":[{"id":"A","text":"Strong buy - momentum is building."},
-                {"id":"B","text":"Overbought territory - consider profit-taking or reduced position."},
-                {"id":"C","text":"RSI above 70 is always a definitive sell signal."},
-                {"id":"D","text":"RSI is irrelevant when MA is rising."}],
-     "correctOptionId":"B","scoreDimension":"technical","pointValue":10,"penalty":-3},
-
-    {"questionId":"q_risk_001","type":"SCENARIO","tier":1,"position":2,
-     "prompt":"Volatility Spike",
-     "contextBlurb":"TSLA's 5-day rolling volatility doubled overnight. FinBERT sentiment flags -0.35 (bearish).",
-     "options":[{"id":"A","text":"Double your position - high volatility means high reward."},
-                {"id":"B","text":"Reduce position size to cap downside exposure."},
-                {"id":"C","text":"Ignore volatility; only price direction matters."}],
-     "correctOptionId":"B","scoreDimension":"riskManagement","pointValue":10,"penalty":-3},
-
-    # TIER 2
-    {"questionId":"q_tech_002","type":"TECHNICAL","tier":2,"position":1,
-     "prompt":"Golden Cross Signal",
-     "contextBlurb":"MSFT's MA5 just crossed above MA10. FinBERT sentiment is +0.42 (bullish).",
-     "options":[{"id":"A","text":"Golden Cross + bullish sentiment - both signals align. Weight towards BUY."},
-                {"id":"B","text":"Ignore the MA crossover; sentiment alone is the reliable signal."},
-                {"id":"C","text":"Wait for RSI to exceed 80 before acting on the crossover."}],
-     "correctOptionId":"A","scoreDimension":"technical","pointValue":15,"penalty":-4},
-
-    {"questionId":"q_sent_002","type":"SENTIMENT","tier":2,"position":1,
-     "prompt":"FinBERT Divergence",
-     "contextBlurb":"AMD's price climbed 6% today. But FinBERT scores across 12 headlines average -0.48.",
-     "options":[{"id":"A","text":"Price momentum dominates - buy immediately."},
-                {"id":"B","text":"Price-sentiment divergence detected. Negative headlines may delay momentum. Reduce confidence weighting."},
-                {"id":"C","text":"Negative sentiment always means sell regardless of price."}],
-     "correctOptionId":"B","scoreDimension":"sentiment","pointValue":15,"penalty":-4},
-
-    {"questionId":"q_risk_002","type":"SCENARIO","tier":2,"position":2,
-     "prompt":"Portfolio Correlation Risk",
-     "contextBlurb":"QuantEdge signals BUY on NVDA and SELL on TSLA simultaneously. NVDA-TSLA correlation: 0.78.",
-     "options":[{"id":"A","text":"Execute both signals at full position size independently."},
-                {"id":"B","text":"High correlation means positions partially offset - size down to account for correlation risk."},
-                {"id":"C","text":"Ignore correlation - each signal is independent."}],
-     "correctOptionId":"B","scoreDimension":"riskManagement","pointValue":20,"penalty":-5},
-
-    # TIER 3
-    {"questionId":"q_sent_003","type":"SENTIMENT","tier":3,"position":2,
-     "prompt":"Sentiment Time-Lag",
-     "contextBlurb":"Headlines from 48h ago: +0.72 sentiment. Today's real-time FinBERT: -0.31.",
-     "options":[{"id":"A","text":"Use the older positive score - more data points."},
-                {"id":"B","text":"Weight recent sentiment more heavily; 48h-old headlines are stale and the market has repriced."},
-                {"id":"C","text":"Average both scores for a balanced view."}],
-     "correctOptionId":"B","scoreDimension":"sentiment","pointValue":20,"penalty":-5},
-
-    {"questionId":"q_xai_001","type":"XAI","tier":3,"position":2,
-     "prompt":"Feature Importance Interpretation",
-     "contextBlurb":"QuantEdge outputs BUY for META (89% conf). SHAP: RSI=0.34, sentiment=0.28, MA5=0.21, Vol=0.12, MA10=0.05.",
-     "options":[{"id":"A","text":"RSI alone drove this decision - ignore all other features."},
-                {"id":"B","text":"RSI + sentiment together account for >62% of the weight - both technical momentum and mood are critical drivers."},
-                {"id":"C","text":"Volatility is the most important feature at 0.12."}],
-     "correctOptionId":"B","scoreDimension":"xaiComprehension","pointValue":25,"penalty":-6},
-
-    {"questionId":"q_risk_003","type":"SCENARIO","tier":3,"position":2,
-     "prompt":"Alpha Decay Risk",
-     "contextBlurb":"QuantEdge issued BUY on NVDA 3 sessions ago. Since then: RSI 28->74, sentiment +0.65->-0.15, volatility doubled.",
-     "options":[{"id":"A","text":"Hold - the original BUY signal is still valid."},
-                {"id":"B","text":"Original signal conditions have decayed - RSI overbought, sentiment reversed, volatility elevated. Re-evaluate now."},
-                {"id":"C","text":"Average down immediately to improve entry price."}],
-     "correctOptionId":"B","scoreDimension":"riskManagement","pointValue":25,"penalty":-6},
-]
-
-_QUESTIONS_BY_ID: Dict[str, Dict[str, Any]] = {q["questionId"]: q for q in _QUESTION_BANK}
+# Lesson rules
+QUESTIONS_PER_LESSON = 10
+PASS_THRESHOLD = 8                 # 8/10 = 80 %
+MAX_GENERATION_ATTEMPTS = 4        # retries per question (bad JSON / duplicates)
+HISTORY_LIMIT_PER_TOPIC = 80       # remembered questions per user per topic
+HISTORY_IN_PROMPT = 15             # how many past questions are shown to the LLM
+DUPLICATE_SIMILARITY = 0.55        # Jaccard similarity above this = duplicate
+SESSION_TTL_SECONDS = 3 * 60 * 60  # abandoned lessons are dropped after 3 hours
 
 
-# --------------------------------------------------------------------------
-# Utility helpers
-# --------------------------------------------------------------------------
+# ============================================================================
+# GROQ LLM
+# ============================================================================
+
+from groq import Groq
+
+_GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
+
+_GROQ_MODEL = "openai/gpt-oss-20b"
+
+_groq_client = (
+    Groq(api_key=_GROQ_KEY)
+    if _GROQ_KEY
+    else None
+)
+
+if not _GROQ_KEY:
+    logger.warning(
+        "GROQ_API_KEY is not configured. "
+        "Learning questions cannot be generated."
+    )
+else:
+    logger.info(
+        "Groq LLM configured successfully. Model: %s",
+        _GROQ_MODEL,
+    )
+
+
+# ============================================================================
+# GEMINI (used only by the XAI explainer and the educational assistant)
+# ============================================================================
+# The XAI explainer and assistant use deterministic fallbacks when Gemini is
+# not configured or its SDK is unavailable.
+
+_GEMINI_KEY = os.getenv("GEMINI_API_KEY", "").strip()
+_gemini_client = None
+
+if _GEMINI_KEY:
+    try:
+        from google import genai
+
+        _gemini_client = genai.Client(api_key=_GEMINI_KEY)
+        logger.info("Gemini client configured for XAI / assistant.")
+    except Exception as exc:
+        logger.warning("Gemini SDK unavailable, using fallbacks: %s", exc)
+        _gemini_client = None
+
+
+# ============================================================================
+# GENERAL HELPERS
+# ============================================================================
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-def _level_for_score(delta: Dict[str, float]) -> int:
-    t = sum(delta.values())
-    if t < 10: return 1
-    if t < 25: return 2
-    if t < 50: return 3
-    if t < 80: return 4
-    return 5
 
-def _level_name(level: int) -> str:
-    return _LEVEL_MAP.get(level, "beginner")
+# ============================================================================
+# LOCAL PERSISTENCE
+# ============================================================================
+#
+# A small JSON store so learning progress (and question history) survives a
+# backend restart. Can later be replaced by PostgreSQL tables without changing
+# the Flutter learning flow.
+# ============================================================================
 
-def _level_config(level: int) -> Dict[str, Any]:
-    return _LEVEL_CONFIG.get(_level_name(level), _LEVEL_CONFIG["beginner"])
+_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+_PROGRESS_FILE = _DATA_DIR / "learning_progress.json"
 
-def _empty_score_vector() -> Dict[str, float]:
-    return {"technical": 0.0, "sentiment": 0.0, "riskManagement": 0.0, "xaiComprehension": 0.0}
-
-def _select_q1() -> Dict[str, Any]:
-    return {**_QUESTIONS_BY_ID["q_scen_001"], "position": 0}
-
-def _select_next_question(session: Dict[str, Any], last_correct: bool) -> Optional[Dict[str, Any]]:
-    answered = set(session["answers"].keys())
-    count = len(answered)
-    if count >= 3:
-        return None
-    target_tier = (2 if last_correct else 1) if count == 1 else min(3, 2 + (1 if last_correct else 0))
-    candidates = [q for q in _QUESTION_BANK
-                  if q["tier"] == target_tier and q["questionId"] not in answered
-                  and q["questionId"] != "q_scen_001"]
-    if not candidates:
-        candidates = [q for q in _QUESTION_BANK if q["questionId"] not in answered]
-    return {**random.choice(candidates)} if candidates else None
+_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# --------------------------------------------------------------------------
-# Pydantic models
-# --------------------------------------------------------------------------
-class QuizInitRequest(BaseModel):
-    userId: str
-    xaiLevel: int = Field(ge=1, le=5)
+def _load_progress() -> Dict[str, Any]:
+    if not _PROGRESS_FILE.exists():
+        return {}
 
-class QuizSubmitRequest(BaseModel):
-    sessionId: str; userId: str; questionId: str; selectedOptionId: str
+    try:
+        with open(_PROGRESS_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
 
-class XaiFeatures(BaseModel):
-    rsi: float; ma5: float; ma10: float; volatility: float
-    sentimentScore: float; marketMood: str; confidence: float
+            return data if isinstance(data, dict) else {}
 
-class XaiExplainRequest(BaseModel):
-    ticker: str; decision: str
-    features: XaiFeatures
-    xaiLevel: int = Field(ge=1, le=5)
-    sessionId: Optional[str] = None
-
-class AssistantQuery(BaseModel):
-    query: str
-    level: Optional[int] = Field(default=2, ge=1, le=5)
-    userId: Optional[str] = None
+    except Exception as exc:
+        logger.warning("Could not load learning progress: %s", exc)
+        return {}
 
 
-# --------------------------------------------------------------------------
-# Quiz routes
-# --------------------------------------------------------------------------
-@app.post("/api/learning/quiz/init")
-async def quiz_init(req: QuizInitRequest) -> Dict[str, Any]:
-    sid = str(uuid.uuid4())
-    q1 = _select_q1()
-    session = {"sessionId": sid, "userId": req.userId, "startedAt": _now_iso(),
-                "completedAt": None, "status": "IN_PROGRESS", "questions": [q1],
-                "answers": {}, "sessionDelta": _empty_score_vector(),
-                "initialXaiLevel": req.xaiLevel, "finalXaiLevel": None}
-    _SESSION_STORE[sid] = session
-    logger.info("Session %s created for %s", sid, req.userId)
-    return {"sessionId": sid, "userId": req.userId, "question": q1,
-            "sessionStatus": "IN_PROGRESS", "startedAt": session["startedAt"]}
+def _save_progress(data: Dict[str, Any]) -> None:
+    temp_file = _PROGRESS_FILE.with_suffix(".tmp")
+
+    try:
+        with open(temp_file, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2)
+
+            # Replace AFTER the file is closed (required on Windows).
+            temp_file.replace(_PROGRESS_FILE)
+
+    except Exception as exc:
+        logger.error("Could not save learning progress: %s", exc)
 
 
-@app.post("/api/learning/quiz/submit")
-async def quiz_submit(req: QuizSubmitRequest) -> Dict[str, Any]:
-    session = _SESSION_STORE.get(req.sessionId)
-    if not session: raise HTTPException(404, "Session not found.")
-    if session["status"] != "IN_PROGRESS": raise HTTPException(409, "Session already completed.")
-    if req.userId != session["userId"]: raise HTTPException(403, "User ID mismatch.")
-    if req.questionId in session["answers"]: raise HTTPException(409, "Question already answered.")
-    question = _QUESTIONS_BY_ID.get(req.questionId)
-    if not question: raise HTTPException(404, "Question not found.")
-
-    is_correct = req.selectedOptionId == question["correctOptionId"]
-    points = question["pointValue"] if is_correct else question["penalty"]
-    dim = question["scoreDimension"]
-    now = _now_iso()
-
-    answer = {"questionId": req.questionId, "selectedOptionId": req.selectedOptionId,
-              "isCorrect": is_correct, "pointsDelta": points, "scoreDimension": dim, "answeredAt": now}
-    session["answers"][req.questionId] = answer
-    session["sessionDelta"][dim] = session["sessionDelta"].get(dim, 0) + points
-    if not any(q["questionId"] == req.questionId for q in session["questions"]):
-        session["questions"].append(question)
-
-    count = len(session["answers"])
-    next_q: Optional[Dict[str, Any]] = None
-    summary: Optional[Dict[str, Any]] = None
-
-    if count < 3:
-        next_q = _select_next_question(session, is_correct)
-        if next_q and next_q["questionId"] not in [q["questionId"] for q in session["questions"]]:
-            session["questions"].append(next_q)
-    else:
-        session["status"] = "COMPLETED"
-        session["completedAt"] = now
-        fl = _level_for_score(session["sessionDelta"])
-        session["finalXaiLevel"] = fl
-        total = sum(a["pointsDelta"] for a in session["answers"].values())
-        summary = {"finalXaiLevel": fl, "levelTier": _level_name(fl), "currentLevel": _level_name(fl),
-                   "levelChanged": fl != session["initialXaiLevel"], "totalPointsEarned": total,
-                   "updatedScoreVector": session["sessionDelta"], "xpAwarded": max(0, total) * 5}
-        logger.info("Session %s done. Level %s->%s", req.sessionId, session["initialXaiLevel"], fl)
-
-    return {"sessionId": req.sessionId, "answer": answer, "sessionDelta": session["sessionDelta"],
-            "nextQuestion": next_q, "sessionStatus": session["status"], "completionSummary": summary,
-            "session": {"state": {"sessionId": req.sessionId, "status": session["status"],
-                                  "questions": session["questions"],
-                                  "currentIndex": count if count < 3 else 3}}}
+_PROGRESS_STORE: Dict[str, Any] = _load_progress()
 
 
-# --------------------------------------------------------------------------
-# XAI explain route
-# --------------------------------------------------------------------------
-@app.post("/api/learning/xai/explain")
-async def xai_explain(req: XaiExplainRequest) -> Dict[str, Any]:
-    cfg = _level_config(req.xaiLevel)
-    depth = _level_name(req.xaiLevel)
-    f = req.features
-    if _gemini_client:
-        text = await _gemini_xai(req, cfg)
-        source = "gemini"
-    else:
-        text = _det_xai(req, depth)
-        source = "deterministic_fallback"
+# ============================================================================
+# ACTIVE LESSON SESSIONS
+# ============================================================================
+#
+# Correct answers are stored here and are NOT sent to Flutter.
+#
+
+_LESSON_SESSIONS: Dict[str, Dict[str, Any]] = {}
+_SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
+
+
+def _session_lock(lesson_id: str) -> asyncio.Lock:
+    lock = _SESSION_LOCKS.get(lesson_id)
+
+    if lock is None:
+        lock = asyncio.Lock()
+        _SESSION_LOCKS[lesson_id] = lock
+
+    return lock
+
+
+def _drop_session(lesson_id: str) -> None:
+    _LESSON_SESSIONS.pop(lesson_id, None)
+    _SESSION_LOCKS.pop(lesson_id, None)
+
+
+def _purge_expired_sessions() -> None:
+    now = time.time()
+
+    expired = [
+        lesson_id
+        for lesson_id, session in _LESSON_SESSIONS.items()
+        if now - session.get("lastActivityEpoch", now) > SESSION_TTL_SECONDS
+    ]
+
+    for lesson_id in expired:
+        _drop_session(lesson_id)
+
+
+# ============================================================================
+# CURRICULUM
+# ============================================================================
+
+CURRICULUM: List[Dict[str, Any]] = [
+    {
+        "id": "stock_basics",
+        "number": 1,
+        "title": "Stock Market Basics",
+        "description": "Learn what stocks are and why companies issue them.",
+        "icon": "📈",
+        "topics": [
+            "What is a stock?",
+            "What does ownership mean?",
+            "Why companies issue stocks",
+            "How investors make money from stocks",
+            "Capital gains and losses",
+        ],
+    },
+    {
+        "id": "ownership_exchanges",
+        "number": 2,
+        "title": "Stock Ownership & Exchanges",
+        "description": "Understand shareholders, exchanges and market participants.",
+        "icon": "🏦",
+        "topics": [
+            "Shareholders",
+            "Stock exchanges",
+            "Primary vs secondary markets",
+            "IPO basics",
+            "Market participants",
+        ],
+    },
+    {
+        "id": "prices_market_cap",
+        "number": 3,
+        "title": "Stock Prices & Market Capitalization",
+        "description": "Understand what determines stock prices and company size.",
+        "icon": "💰",
+        "topics": [
+            "Stock price",
+            "Supply and demand",
+            "Market capitalization",
+            "Large-cap, mid-cap and small-cap",
+            "Price vs company value",
+        ],
+    },
+    {
+        "id": "charts",
+        "number": 4,
+        "title": "Reading Stock Charts",
+        "description": "Learn how to understand price charts and market movement.",
+        "icon": "📊",
+        "topics": [
+            "Line charts",
+            "Candlestick charts",
+            "Open, high, low and close",
+            "Trading volume",
+            "Price trends",
+        ],
+    },
+    {
+        "id": "fundamental_analysis",
+        "number": 5,
+        "title": "Fundamental Analysis",
+        "description": "Learn how investors evaluate a company's financial health.",
+        "icon": "🔎",
+        "topics": [
+            "Revenue",
+            "Gross profit",
+            "Operating profit",
+            "Net income",
+            "Cash flow",
+            "Balance sheet basics",
+        ],
+    },
+    {
+        "id": "valuation",
+        "number": 6,
+        "title": "Valuation Ratios",
+        "description": "Understand common ratios used to evaluate stocks.",
+        "icon": "🧮",
+        "topics": [
+            "EPS",
+            "P/E ratio",
+            "P/B ratio",
+            "PEG ratio",
+            "Price-to-sales",
+            "Interpreting valuation",
+        ],
+    },
+    {
+        "id": "dividends_growth",
+        "number": 7,
+        "title": "Dividends & Growth Investing",
+        "description": "Explore dividend investing and growth companies.",
+        "icon": "🌱",
+        "topics": [
+            "Dividends",
+            "Dividend yield",
+            "Dividend growth",
+            "Growth stocks",
+            "Value vs growth",
+            "Total return",
+        ],
+    },
+    {
+        "id": "technical_analysis",
+        "number": 8,
+        "title": "Technical Analysis",
+        "description": "Learn indicators used to analyze price momentum and trends.",
+        "icon": "📉",
+        "topics": [
+            "Moving averages",
+            "MA crossovers",
+            "RSI",
+            "Support and resistance",
+            "Momentum",
+            "Trend following",
+        ],
+    },
+    {
+        "id": "risk_management",
+        "number": 9,
+        "title": "Risk Management",
+        "description": "Learn how investors manage downside and uncertainty.",
+        "icon": "🛡️",
+        "topics": [
+            "Volatility",
+            "Risk vs return",
+            "Position sizing",
+            "Stop-loss concepts",
+            "Risk-reward ratio",
+            "Drawdowns",
+        ],
+    },
+    {
+        "id": "portfolio",
+        "number": 10,
+        "title": "Portfolio Diversification",
+        "description": "Learn how multiple investments work together in a portfolio.",
+        "icon": "💼",
+        "topics": [
+            "Diversification",
+            "Asset allocation",
+            "Correlation",
+            "Portfolio risk",
+            "Rebalancing",
+            "Concentration risk",
+        ],
+    },
+    {
+        "id": "news_sentiment",
+        "number": 11,
+        "title": "Market News & Sentiment",
+        "description": "Understand how financial news can affect market sentiment.",
+        "icon": "📰",
+        "topics": [
+            "Bullish and bearish sentiment",
+            "Financial news",
+            "Sentiment analysis",
+            "News-price divergence",
+            "Market expectations",
+        ],
+    },
+    {
+        "id": "earnings_events",
+        "number": 12,
+        "title": "Earnings & Company Events",
+        "description": "Understand earnings announcements and market reactions.",
+        "icon": "📅",
+        "topics": [
+            "Earnings reports",
+            "EPS estimates",
+            "Revenue estimates",
+            "Earnings surprises",
+            "Company guidance",
+            "Market reaction",
+        ],
+    },
+    {
+        "id": "market_mechanics",
+        "number": 13,
+        "title": "Trading & Market Mechanics",
+        "description": "Learn how buying and selling actually works.",
+        "icon": "⚡",
+        "topics": [
+            "Market orders",
+            "Limit orders",
+            "Bid and ask",
+            "Liquidity",
+            "Order books",
+            "Slippage",
+        ],
+    },
+    {
+        "id": "advanced_investing",
+        "number": 14,
+        "title": "Advanced Investing Concepts",
+        "description": "Build deeper understanding of modern investing concepts.",
+        "icon": "🧠",
+        "topics": [
+            "Beta",
+            "Systematic risk",
+            "Alpha",
+            "Market regimes",
+            "Factor investing",
+            "Signal quality",
+        ],
+    },
+    {
+        "id": "quant_ai",
+        "number": 15,
+        "title": "Quantitative & AI Investing",
+        "description": "Learn how data, machine learning and AI can support market analysis.",
+        "icon": "🤖",
+        "topics": [
+            "Features in ML models",
+            "Model predictions",
+            "Sentiment models",
+            "SHAP feature importance",
+            "Backtesting",
+            "Overfitting",
+            "Model confidence",
+        ],
+    },
+]
+
+
+# ============================================================================
+# SCORE / DIFFICULTY SYSTEM
+# ============================================================================
+
+SCORE_NAMES = {
+    1: "Newbie",
+    2: "Beginner",
+    3: "Beginner+",
+    4: "Intermediate",
+    5: "Intermediate+",
+    6: "Advanced",
+    7: "Advanced+",
+    8: "Expert",
+    9: "Expert+",
+    10: "Master",
+}
+
+DIFFICULTY_ORDER = ["easy", "easy_medium", "medium", "medium_hard", "hard"]
+
+
+def _score_name(score: int) -> str:
+    return SCORE_NAMES.get(score, "Newbie")
+
+
+def _difficulty_for_score(score: int) -> str:
+    if score <= 2:
+        return "easy"
+
+    if score <= 4:
+        return "easy_medium"
+
+    if score <= 6:
+        return "medium"
+
+    if score <= 8:
+        return "medium_hard"
+
+    return "hard"
+
+
+def _difficulty_description(difficulty: str) -> str:
+    descriptions = {
+        "easy": (
+            "Very beginner-friendly. Test one basic concept. "
+            "Use simple language, define any jargon, and use straightforward "
+            "everyday examples. No calculations beyond trivial arithmetic."
+        ),
+        "easy_medium": (
+            "Beginner to intermediate. Test understanding plus a "
+            "small amount of application. Simple one-step numbers are fine."
+        ),
+        "medium": (
+            "Intermediate. Require applying concepts, interpreting "
+            "simple numbers or comparing two situations."
+        ),
+        "medium_hard": (
+            "Advanced. Combine multiple concepts and require reasoning "
+            "about realistic stock-market situations. Distractors should "
+            "reflect common, subtle misconceptions."
+        ),
+        "hard": (
+            "Expert-level. Use multi-step reasoning, realistic scenarios, "
+            "valuation, portfolio, technical or quantitative concepts. "
+            "Distractors should be tempting to someone with partial knowledge."
+        ),
+    }
+
+    return descriptions.get(difficulty, descriptions["easy"])
+
+
+def _difficulty_label(difficulty: str) -> str:
+    return difficulty.replace("_", " ").title()
+
+
+def _shift_difficulty(difficulty: str, shift: int) -> str:
+    """Move a difficulty up/down the ladder, clamped to the valid range."""
+
+    try:
+        index = DIFFICULTY_ORDER.index(difficulty)
+    except ValueError:
+        index = 0
+
+    index = max(0, min(len(DIFFICULTY_ORDER) - 1, index + shift))
+
+    return DIFFICULTY_ORDER[index]
+
+
+def _audience_note(score: int) -> str:
+    if score <= 2:
+        return (
+            "The learner has little or no investing background. Define terms "
+            "inline, avoid abbreviations unless explained."
+        )
+
+    if score <= 4:
+        return (
+            "The learner knows the basics and is building core vocabulary. "
+            "Brief definitions are welcome for newer terms."
+        )
+
+    if score <= 6:
+        return (
+            "The learner is comfortable with core concepts and wants to "
+            "apply them to realistic situations."
+        )
+
+    if score <= 8:
+        return (
+            "The learner is advanced. Skip basic definitions and test "
+            "judgment, trade-offs and multi-concept reasoning."
+        )
+
+    return (
+        "The learner is near mastery. Test nuance, edge cases and "
+        "quantitative reasoning rather than definitions."
+    )
+
+
+# ============================================================================
+# QUESTION VARIETY (styles / angles / ramp)
+# ============================================================================
+
+QUESTION_TYPES = ["CONCEPT", "SCENARIO", "CALCULATION", "CHART", "COMPARISON"]
+
+TYPE_GUIDANCE = {
+    "CONCEPT": "Test understanding of an idea or definition.",
+    "SCENARIO": "Describe a short realistic situation and ask what it means or what happens.",
+    "CALCULATION": (
+        "Give small, clean numbers and ask for a result or interpretation. "
+        "Double-check the arithmetic so exactly one option is correct."
+    ),
+    "CHART": (
+        "Describe a price/volume pattern IN WORDS (no images exist) and ask "
+        "what it suggests."
+    ),
+    "COMPARISON": "Compare two concepts, stocks or situations and ask which statement is correct.",
+}
+
+# Rotated so retakes ask about the same subtopic from a different direction.
+QUESTION_ANGLES = [
+    "definition in the learner's own terms",
+    "a realistic real-world scenario",
+    "a common beginner misconception (ask which statement is TRUE)",
+    "cause and effect: what happens if X changes",
+    "spot the mistake in someone's reasoning",
+    "compare two similar-looking ideas",
+    "a small numerical example",
+    "why does this matter to an investor",
+    "which statement is NOT true",
+    "apply the idea to a named company such as AAPL, MSFT, NVDA, TSLA, AMZN, GOOGL, META, AMD or SPY",
+]
+
+# Inside a lesson: warm-up -> core -> challenge (offsets on the base difficulty)
+def _ramp_offset(question_number: int) -> int:
+    if question_number <= 3:
+        return -1
+    if question_number >= 8:
+        return 1
+    return 0
+
+
+def _build_lesson_plan(
+    topic: Dict[str, Any],
+    base_difficulty: str,
+) -> List[Dict[str, Any]]:
+    """
+    Pre-plan all questions of a lesson so that:
+        * every subtopic is covered before any is repeated,
+        * consecutive questions use different styles and angles,
+        * difficulty ramps up through the lesson.
+        A fresh random plan is built for every lesson, which is the first line of
+        defence against repeating questions on a retake.
+        """
+
+    subtopics = list(topic["topics"])
+    if not subtopics:
+        raise ValueError("Topic must have at least one subtopic.")
+
+    sequence: List[str] = []
+    while len(sequence) < QUESTIONS_PER_LESSON:
+        batch = subtopics[:]
+        random.shuffle(batch)
+        if sequence and batch and batch[0] == sequence[-1] and len(batch) > 1:
+            batch[0], batch[-1] = batch[-1], batch[0]
+        sequence.extend(batch)
+    sequence = sequence[:QUESTIONS_PER_LESSON]
+
+    angles: List[str] = []
+    while len(angles) < QUESTIONS_PER_LESSON:
+        batch = QUESTION_ANGLES[:]
+        random.shuffle(batch)
+        angles.extend(batch)
+    angles = angles[:QUESTIONS_PER_LESSON]
+
+    plan: List[Dict[str, Any]] = []
+    last_type: Optional[str] = None
+    for index in range(QUESTIONS_PER_LESSON):
+        number = index + 1
+        choices = [qtype for qtype in QUESTION_TYPES if qtype != last_type]
+        if base_difficulty == "easy":
+            choices = [qtype for qtype in choices if qtype != "CALCULATION"] or choices
+        qtype = random.choice(choices)
+        last_type = qtype
+        plan.append(
+            {
+                "subtopic": sequence[index],
+                "qtype": qtype,
+                "angle": angles[index],
+                "difficulty": _shift_difficulty(
+                    base_difficulty,
+                    _ramp_offset(number),
+                ),
+                "isReview": False,
+            }
+        )
+
+    return plan
+
+def _profile_defaults(user_id: str) -> Dict[str, Any]:
     return {
-        "ticker": req.ticker, "decision": req.decision, "explanationDepth": depth,
-        "headline": _headline(req.ticker, req.decision, f),
-        "summary": text,                 # Flutter quiz_provider reads `summary`
-        "detailedExplanation": text,
-        "tooltipInsight": _tooltip(req.ticker, req.decision, f, req.xaiLevel),
-        "featureImportance": _feat_imp(f, req.decision),
-        "generatedBy": source, "generatedAt": _now_iso(),
-        "levelConfig": {"label": cfg["label"], "featuresShown": cfg["features_shown"]},
+        "userId": user_id,
+        "score": 1,
+        "xp": 0,
+        "currentTopicIndex": 0,
+        "completedTopics": [],
+        "topicAttempts": {},
+        "topicBestScores": {},
+        "questionHistory": {},
+        "totalLessonsCompleted": 0,
+        "lessonsPassed": 0,
+        "totalQuestions": 0,
+        "correctAnswers": 0,
+        "streak": 0,
+        "bestStreak": 0,
+        "dayStreak": 0,
+        "lastActiveDate": None,
+        "onboarded": False,
+        "onboardingLevel": None,
+        "lastAnsweredAt": None,
+        "createdAt": _now_iso(),
+        "updatedAt": _now_iso(),
     }
 
 
-# --------------------------------------------------------------------------
-# App data endpoints
-# --------------------------------------------------------------------------
+def _create_new_profile(user_id: str) -> Dict[str, Any]:
+    return _profile_defaults(user_id)
+
+
+def _get_profile(user_id: str) -> Dict[str, Any]:
+    if user_id not in _PROGRESS_STORE:
+        _PROGRESS_STORE[user_id] = _create_new_profile(user_id)
+        _save_progress(_PROGRESS_STORE)
+        return _PROGRESS_STORE[user_id]
+
+    profile = _PROGRESS_STORE[user_id]
+
+    # Back-fill fields added in newer versions so old saved profiles keep working.
+    had_onboarding_flag = "onboarded" in profile
+
+    for key, value in _profile_defaults(user_id).items():
+        profile.setdefault(key, value)
+
+        # Users who already learned something before onboarding existed must not
+        # be sent through the onboarding questions (or have progress reset).
+        if not had_onboarding_flag and (
+            profile.get("totalQuestions", 0) > 0
+            or profile.get("completedTopics")
+        ):
+            profile["onboarded"] = True
+
+        return profile
+
+
+def _find_topic(topic_id: str) -> Optional[Dict[str, Any]]:
+    for topic in CURRICULUM:
+        if topic["id"] == topic_id:
+            return topic
+
+    return None
+
+
+def _current_topic(profile: Dict[str, Any]) -> Dict[str, Any]:
+    index = profile.get("currentTopicIndex", 0)
+
+    if index >= len(CURRICULUM):
+        index = len(CURRICULUM) - 1
+
+    return CURRICULUM[index]
+
+
+def _topic_is_completed(profile: Dict[str, Any], topic_id: str) -> bool:
+    return topic_id in profile.get("completedTopics", [])
+
+
+def _calculate_accuracy(profile: Dict[str, Any]) -> float:
+    total = profile.get("totalQuestions", 0)
+
+    if total == 0:
+        return 0.0
+
+    return round(profile.get("correctAnswers", 0) / total, 2)
+
+
+def _topic_summary(topic: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": topic["id"],
+        "number": topic["number"],
+        "title": topic["title"],
+        "description": topic["description"],
+        "icon": topic["icon"],
+    }
+
+
+def _update_day_streak(profile: Dict[str, Any]) -> None:
+    """Consecutive-days-practised streak (like Duolingo's flame)."""
+
+    today = datetime.now(timezone.utc).date()
+    last = profile.get("lastActiveDate")
+
+    if last == today.isoformat():
+        return
+
+    if last:
+        try:
+            gap = (today - date.fromisoformat(last)).days
+        except ValueError:
+            gap = 999
+
+        profile["dayStreak"] = profile.get("dayStreak", 0) + 1 if gap == 1 else 1
+    else:
+        profile["dayStreak"] = 1
+
+    profile["lastActiveDate"] = today.isoformat()
+
+
+# ============================================================================
+# QUESTION HISTORY / DUPLICATE DETECTION
+# ============================================================================
+
+_STOPWORDS = {
+    "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is", "are",
+    "was", "were", "be", "by", "with", "as", "at", "that", "this", "it", "its",
+    "which", "what", "how", "why", "does", "do", "did", "if", "than", "from",
+    "will", "would", "can", "could", "has", "have", "had", "most", "best",
+    "following", "statement", "true", "correct",
+}
+
+
+def _tokens(text: str) -> set:
+    return {
+        word
+        for word in re.findall(r"[a-z0-9]+", text.lower())
+        if word not in _STOPWORDS
+    }
+
+
+def _is_duplicate(prompt: str, seen: List[str]) -> bool:
+    candidate = _tokens(prompt)
+
+    if not candidate:
+        return False
+
+    for old in seen:
+        other = _tokens(old)
+
+        if not other:
+            continue
+
+        similarity = len(candidate & other) / len(candidate | other)
+
+        if similarity >= DUPLICATE_SIMILARITY:
+            return True
+
+    return False
+
+
+def _topic_history(profile: Dict[str, Any], topic_id: str) -> List[str]:
+    return profile.setdefault("questionHistory", {}).setdefault(topic_id, [])
+
+
+def _remember_question(
+    profile: Dict[str, Any],
+    topic_id: str,
+    prompt: str,
+) -> None:
+    history = _topic_history(profile, topic_id)
+    history.append(prompt)
+
+    if len(history) > HISTORY_LIMIT_PER_TOPIC:
+        del history[: len(history) - HISTORY_LIMIT_PER_TOPIC]
+
+
+        # ============================================================================
+        # QUESTION GENERATION
+        # ============================================================================
+
+def _clean_json_response(raw: str) -> str:
+    raw = raw.strip()
+
+    if raw.startswith("```"):
+        parts = raw.split("\n", 1)
+
+        if len(parts) == 2:
+            raw = parts[1]
+
+            if raw.rstrip().endswith("```"):
+                raw = raw.rstrip()[:-3]
+
+                raw = raw.strip()
+
+                # If the model wrapped the JSON in prose, keep only the outermost object.
+                if not raw.startswith("{"):
+                    start = raw.find("{")
+                    end = raw.rfind("}")
+
+                    if start != -1 and end > start:
+                        raw = raw[start : end + 1]
+
+    return raw.strip()
+
+
+_BANNED_OPTION_PATTERNS = re.compile(
+    r"(all of the above|none of the above|both a and b|both b and c|"
+    r"a and b|b and c|a and c|c and d)",
+    re.IGNORECASE,
+)
+# Match explicit option labels, not normal prose such as "a learner's answer".
+_LETTER_REFERENCE = re.compile(
+    r"\b(?:[Oo]ption|[Cc]hoice|[Aa]nswer)\s+([ABCD])\b"
+)
+
+
+def _validate_and_shape_question(
+    data: Dict[str, Any],
+    plan: Dict[str, Any],
+    topic: Dict[str, Any],
+    score: int,
+) -> Dict[str, Any]:
+    """Validate LLM output and convert it into the internal question shape."""
+    required_fields = (
+        "prompt", "contextBlurb", "type", "options", "correctOptionId",
+        "explanation", "learningTip",
+    )
+    for field in required_fields:
+        if field not in data:
+            raise ValueError(f"Missing field: {field}")
+
+    prompt = str(data["prompt"]).strip()
+    explanation = str(data["explanation"]).strip()
+    if len(prompt) < 10:
+        raise ValueError("Question prompt is empty or too short.")
+    if not explanation:
+        raise ValueError("Explanation is empty.")
+
+    options = data["options"]
+    if not isinstance(options, list) or len(options) != 4:
+        raise ValueError("Question must contain exactly four options.")
+    if not all(isinstance(option, dict) for option in options):
+        raise ValueError("Every option must be an object.")
+
+    option_ids = [str(option.get("id", "")).strip().upper() for option in options]
+    if option_ids != ["A", "B", "C", "D"]:
+        raise ValueError("Options must be A, B, C and D.")
+    correct_id = str(data["correctOptionId"]).strip().upper()
+    if correct_id not in option_ids:
+        raise ValueError("Invalid correct option.")
+
+    texts = [str(option.get("text", "")).strip() for option in options]
+    if any(not text for text in texts):
+        raise ValueError("An option has empty text.")
+    if len({text.lower() for text in texts}) != 4:
+        raise ValueError("Options must be distinct.")
+    if any(_BANNED_OPTION_PATTERNS.search(text) for text in texts):
+        raise ValueError("Options like 'all of the above' are not allowed.")
+    if _LETTER_REFERENCE.search(prompt):
+        raise ValueError("Prompt refers to options by letter (breaks after shuffling).")
+
+    def replace_letter_reference(match: re.Match[str]) -> str:
+        return f'"{texts[option_ids.index(match.group(1))]}"'
+
+    explanation = _LETTER_REFERENCE.sub(replace_letter_reference, explanation)
+    learning_tip = _LETTER_REFERENCE.sub(
+        replace_letter_reference,
+        str(data["learningTip"]).strip(),
+    )
+
+    correct_index = option_ids.index(correct_id)
+    order = list(range(4))
+    random.shuffle(order)
+    shuffled_options = [
+        {"id": "ABCD"[position], "text": texts[original]}
+        for position, original in enumerate(order)
+    ]
+    new_correct_id = "ABCD"[order.index(correct_index)]
+
+    qtype = str(data["type"]).strip().upper()
+    if qtype not in QUESTION_TYPES:
+        qtype = plan["qtype"]
+
+    return {
+        "questionId": f"q_{uuid.uuid4().hex[:12]}",
+        "prompt": prompt,
+        "contextBlurb": str(data.get("contextBlurb", "") or "").strip(),
+        "type": qtype,
+        "options": shuffled_options,
+        "correctOptionId": new_correct_id,
+        "explanation": explanation,
+        "learningTip": learning_tip,
+        "topicId": topic["id"],
+        "topicTitle": topic["title"],
+        "difficulty": plan["difficulty"],
+        "scoreLevel": score,
+        "focus": plan["subtopic"],
+        "isReview": bool(plan.get("isReview", False)),
+        "generatedBy": "groq",
+        "model": _GROQ_MODEL,
+    }
+
+def _build_question_prompt(
+    topic: Dict[str, Any],
+    score: int,
+    plan: Dict[str, Any],
+    question_number: int,
+    previous_questions: List[str],
+    history: List[str],
+    attempt: int,
+) -> str:
+    score_name = _score_name(score)
+    difficulty = plan["difficulty"]
+    difficulty_description = _difficulty_description(difficulty)
+    subtopics = ", ".join(topic["topics"])
+
+    in_lesson = "\n".join(f"- {q}" for q in previous_questions) or "None"
+
+    older = [q for q in history[-HISTORY_IN_PROMPT:] if q not in previous_questions]
+    from_history = "\n".join(f"- {q}" for q in older) or "None"
+
+    review_note = (
+        "This is a REVIEW question: the learner just answered this subtopic "
+        "incorrectly. Test the SAME underlying idea from a different angle "
+        "with different wording and a different example.\n"
+        if plan.get("isReview")
+        else ""
+    )
+
+    retry_note = (
+        "\nYour previous attempt was rejected as invalid or too similar to an "
+        "existing question. Write a clearly DIFFERENT question this time.\n"
+        if attempt > 0
+        else ""
+    )
+
+    return f"""
+    You are the QuantEdge Learning Engine.
+
+    Generate ONE high-quality educational multiple-choice question for a
+    stock-market learning app inspired by Duolingo. The learner must be able to go
+    from complete beginner to expert through these questions, so every question
+    should teach something as well as test it.
+
+    LEARNER
+    - Score: {score}/10 ({score_name})
+    - Difficulty for THIS question: {difficulty}
+    - Difficulty description: {difficulty_description}
+    - Audience note: {_audience_note(score)}
+
+    CURRENT LESSON
+    - Topic: {topic["title"]}
+    - Topic description: {topic["description"]}
+    - All subtopics of this topic: {subtopics}
+    - Question number: {question_number}/{QUESTIONS_PER_LESSON}
+
+    THIS QUESTION MUST FOLLOW THIS PLAN
+    - Subtopic focus: {plan["subtopic"]}
+    - Question style: {plan["qtype"]} -> {TYPE_GUIDANCE[plan["qtype"]]}
+    - Angle: {plan["angle"]}
+    (If the style truly does not fit the subtopic, use CONCEPT or SCENARIO and set
+    "type" accordingly.)
+    {review_note}{retry_note}
+    QUESTIONS ALREADY ASKED IN THIS LESSON (never repeat or paraphrase):
+        {in_lesson}
+
+        QUESTIONS THE LEARNER HAS SEEN IN EARLIER ATTEMPTS OF THIS TOPIC
+        (do NOT reuse the same idea, scenario, numbers or wording):
+            {from_history}
+
+            QUALITY RULES
+            1. The question MUST teach or test stock-market/investing knowledge.
+            2. Stay within the topic, centred on the subtopic focus above.
+            3. Match the requested difficulty exactly - not easier, not harder.
+            4. Never repeat or closely paraphrase any question listed above.
+            5. Use varied, concrete examples. Realistic stock examples (AAPL, MSFT, NVDA,
+            TSLA, AMZN, GOOGL, META, AMD, SPY) are fine; use plausible numbers but never
+            present them as current real-time market data.
+            6. Exactly FOUR options with ids A, B, C, D and exactly ONE correct answer.
+            7. Distractors must be plausible and based on real misconceptions, but wrong
+            after careful reasoning. Keep all options similar in length and style so the
+            correct one is not obvious from its length.
+            8. Do NOT use "all of the above", "none of the above" or "A and B" options.
+            9. Do NOT refer to options by letter inside the prompt or explanation.
+            10. No real-time stock predictions, no personalised financial advice, no
+            trading recommendations.
+            11. The question must be factually correct and unambiguous. For calculations,
+            verify the arithmetic.
+            12. Keep the question concise. The explanation must say why the right answer is
+            right AND briefly why the most tempting wrong answer is wrong.
+            13. "learningTip" is one short memorable takeaway.
+            14. Return ONLY valid JSON. No markdown, no code fences, complete and closed.
+
+            RETURN THIS EXACT STRUCTURE:
+
+                {{
+                    "prompt": "Question text",
+                    "contextBlurb": "Optional short scenario or learning context (may be empty)",
+                    "type": "CONCEPT",
+                    "options": [
+                        {{"id": "A", "text": "Option A"}},
+                        {{"id": "B", "text": "Option B"}},
+                        {{"id": "C", "text": "Option C"}},
+                        {{"id": "D", "text": "Option D"}}
+                    ],
+                    "correctOptionId": "A",
+                    "explanation": "Why the correct answer is correct.",
+                    "learningTip": "One short takeaway."
+                }}
+
+                The "type" must be exactly one of: CONCEPT, SCENARIO, CALCULATION, CHART, COMPARISON
+                """
+
+
+def _call_groq(prompt: str) -> str:
+    """Blocking Groq call (run via asyncio.to_thread)."""
+
+    response = _groq_client.chat.completions.create(
+        model=_GROQ_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are an expert stock-market educator. "
+                    "Generate accurate, engaging educational questions that "
+                    "match the learner's level. Return ONLY valid JSON. "
+                    "Do not use markdown or code fences."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        temperature=0.7,
+        max_completion_tokens=2000,
+        reasoning_effort="low",
+        response_format={"type": "json_object"},
+    )
+
+    return response.choices[0].message.content or ""
+
+
+async def _generate_question(
+    topic: Dict[str, Any],
+    score: int,
+    difficulty: str,
+    question_number: int,
+    previous_questions: List[str],
+    plan: Optional[Dict[str, Any]] = None,
+    history: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Generate one validated, non-duplicate question.
+
+    Retries up to MAX_GENERATION_ATTEMPTS times when the model returns invalid
+    JSON, a malformed question, or a question that is too similar to anything
+    the learner has already seen in this lesson or earlier attempts.
+    """
+
+    if not _groq_client:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Groq is not configured. "
+                "Set GROQ_API_KEY in backend/.env before starting lessons."
+            ),
+        )
+
+    history = history or []
+    if plan is None:
+        plan = {
+            "subtopic": random.choice(topic["topics"]),
+            "qtype": random.choice(QUESTION_TYPES),
+            "angle": random.choice(QUESTION_ANGLES),
+            "difficulty": difficulty,
+            "isReview": False,
+        }
+
+    seen = list(history) + list(previous_questions)
+    last_error: Optional[Exception] = None
+    for attempt in range(MAX_GENERATION_ATTEMPTS):
+        prompt = _build_question_prompt(
+            topic=topic,
+            score=score,
+            plan=plan,
+            question_number=question_number,
+            previous_questions=previous_questions,
+            history=history,
+            attempt=attempt,
+        )
+        try:
+            raw = await asyncio.to_thread(_call_groq, prompt)
+            data = json.loads(_clean_json_response(raw))
+            question = _validate_and_shape_question(data, plan, topic, score)
+            if _is_duplicate(question["prompt"], seen):
+                raise ValueError("Question is too similar to a previous one.")
+            return question
+        except Exception as exc:
+            last_error = exc
+            logger.warning(
+                "Question generation attempt %s/%s failed: %s",
+                attempt + 1,
+                MAX_GENERATION_ATTEMPTS,
+                exc,
+            )
+            plan = {
+                **plan,
+                "angle": random.choice(QUESTION_ANGLES),
+                "qtype": random.choice(QUESTION_TYPES),
+            }
+
+    logger.error("Groq question generation failed: %s", last_error)
+    raise HTTPException(
+        status_code=502,
+        detail="The learning engine could not generate a question using the Groq LLM.",
+    )
+
+
+def _public_question(question: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Remove the correct answer and internal metadata before sending
+    the question to Flutter.
+    """
+
+    return {
+        "questionId": question["questionId"],
+        "prompt": question["prompt"],
+        "contextBlurb": question["contextBlurb"],
+        "type": question["type"],
+        "options": question["options"],
+        "topicId": question["topicId"],
+        "topicTitle": question["topicTitle"],
+        "difficulty": question["difficulty"],
+        "scoreLevel": question["scoreLevel"],
+        "focus": question.get("focus", ""),
+        "isReview": question.get("isReview", False),
+        "generatedBy": question["generatedBy"],
+    }
+
+
+def _option_text(question: Dict[str, Any], option_id: str) -> str:
+    for option in question["options"]:
+        if option["id"] == option_id:
+            return option["text"]
+
+    return ""
+
+
+    # ============================================================================
+    # PYDANTIC MODELS
+    # ============================================================================
+
+class LessonStartRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    # Optional: practise an already unlocked topic instead of the current one.
+    topicId: Optional[str] = None
+
+
+class LessonAnswerRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    lessonId: str = Field(min_length=1)
+    questionId: str = Field(min_length=1)
+    selectedOptionId: str = Field(pattern="^[ABCD]$")
+
+class OnboardingRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    # 0-based index of the topic the learner starts on. Every topic before it
+    # is unlocked too, so the learner can practise all of them.
+    startTopicIndex: int = Field(ge=0, le=len(CURRICULUM) - 1)
+    level: Optional[str] = None
+
+class XaiFeatures(BaseModel):
+    rsi: float
+    ma5: float
+    ma10: float
+    volatility: float
+    sentimentScore: float
+    marketMood: str
+    confidence: float
+
+
+class XaiExplainRequest(BaseModel):
+    ticker: str
+    decision: str
+    features: XaiFeatures
+    xaiLevel: int = Field(ge=1, le=10)
+    sessionId: Optional[str] = None
+
+
+class AssistantQuery(BaseModel):
+    query: str
+    level: Optional[int] = Field(default=2, ge=1, le=10)
+    userId: Optional[str] = None
+
+
+@app.get("/api/learning/topics")
+async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
+    profile = _get_profile(userId) if userId else None
+    current_index = profile["currentTopicIndex"] if profile else 0
+    completed_topics = set(profile.get("completedTopics", [])) if profile else set()
+    topics = []
+
+    for index, topic in enumerate(CURRICULUM):
+        completed = topic["id"] in completed_topics
+        unlocked = index <= current_index
+        if index == current_index and not completed:
+            status = "current"
+        elif completed:
+            status = "completed"
+        elif unlocked:
+            status = "available"
+        else:
+            status = "locked"
+
+        entry = {
+            "id": topic["id"],
+            "number": topic["number"],
+            "title": topic["title"],
+            "description": topic["description"],
+            "icon": topic["icon"],
+            "status": status,
+            "unlocked": unlocked,
+            "completed": completed,
+            "subtopics": topic["topics"],
+        }
+        if profile:
+            entry["attempts"] = profile["topicAttempts"].get(topic["id"], 0)
+            entry["bestScore"] = profile["topicBestScores"].get(topic["id"])
+        topics.append(entry)
+
+    return {
+        "topics": topics,
+        "totalTopics": len(CURRICULUM),
+        "currentTopicIndex": min(current_index, len(CURRICULUM) - 1),
+        "allCompleted": current_index >= len(CURRICULUM),
+        "score": profile["score"] if profile else 1,
+        "scoreName": _score_name(profile["score"]) if profile else "Newbie",
+    }
+
+
+@app.get("/api/learning/progress")
+async def get_learning_progress(userId: str) -> Dict[str, Any]:
+    profile = _get_profile(userId)
+    topic = _current_topic(profile)
+    return {
+        "userId": profile["userId"],
+        "score": profile["score"],
+        "scoreName": _score_name(profile["score"]),
+        "difficulty": _difficulty_for_score(profile["score"]),
+        "difficultyLabel": _difficulty_label(_difficulty_for_score(profile["score"])),
+        "xp": profile["xp"],
+        "streak": profile["streak"],
+        "bestStreak": profile["bestStreak"],
+        "dayStreak": profile["dayStreak"],
+        "currentTopic": _topic_summary(topic),
+        "currentTopicIndex": min(profile["currentTopicIndex"], len(CURRICULUM) - 1),
+        "allTopicsCompleted": profile["currentTopicIndex"] >= len(CURRICULUM),
+        "completedTopics": profile["completedTopics"],
+        "completedTopicCount": len(profile["completedTopics"]),
+        "totalTopics": len(CURRICULUM),
+        "totalQuestions": profile["totalQuestions"],
+        "correctAnswers": profile["correctAnswers"],
+        "overallAccuracy": _calculate_accuracy(profile),
+        "lessonsCompleted": profile["totalLessonsCompleted"],
+        "lessonsPassed": profile["lessonsPassed"],
+        "onboarded": profile["onboarded"],
+    }
+
+
+# ============================================================================
+# ONBOARDING (starting place)
+# ============================================================================
+
+def _starting_score(start_topic_index: int) -> int:
+    """
+    Starting score (1-10) for a learner who skips ahead. Deliberately capped
+    so a self-assessed expert still gets questions they can answer.
+    """
+
+    return max(1, min(1 + start_topic_index // 2, 6))
+
+
+@app.post("/api/learning/onboarding")
+async def complete_onboarding(req: OnboardingRequest) -> Dict[str, Any]:
+    """
+    Called once, right after the learner answers the onboarding questions.
+    Unlocks every topic up to startTopicIndex and sets a matching score.
+
+    Safe to call twice: once a user is onboarded their progress is never
+    reset or lowered.
+    """
+
+    profile = _get_profile(req.userId)
+
+    if not profile.get("onboarded"):
+        profile["currentTopicIndex"] = max(
+            profile["currentTopicIndex"],
+            req.startTopicIndex,
+        )
+        profile["score"] = max(
+            profile["score"],
+            _starting_score(req.startTopicIndex),
+        )
+        profile["onboarded"] = True
+        profile["onboardingLevel"] = req.level
+        profile["updatedAt"] = _now_iso()
+
+        _save_progress(_PROGRESS_STORE)
+
+        logger.info(
+            "Onboarding complete: user=%s startTopicIndex=%s level=%s score=%s",
+            req.userId,
+            req.startTopicIndex,
+            req.level,
+            profile["score"],
+        )
+
+        topic = _current_topic(profile)
+
+        return {
+            "onboarded": True,
+            "unlockedTopics": min(
+                profile["currentTopicIndex"] + 1,
+                len(CURRICULUM),
+            ),
+            "currentTopicIndex": profile["currentTopicIndex"],
+            "currentTopic": _topic_summary(topic),
+            "score": profile["score"],
+            "scoreName": _score_name(profile["score"]),
+        }
+
+
+@app.post("/api/learning/lesson/start")
+async def start_lesson(req: LessonStartRequest) -> Dict[str, Any]:
+    _purge_expired_sessions()
+    profile = _get_profile(req.userId)
+
+    if profile["currentTopicIndex"] >= len(CURRICULUM):
+        return {
+            "completedAllTopics": True,
+            "message": "Congratulations! You completed the full learning path.",
+            "score": profile["score"],
+            "scoreName": _score_name(profile["score"]),
+        }
+
+    if req.topicId:
+        topic = _find_topic(req.topicId)
+        if topic is None:
+            raise HTTPException(status_code=404, detail="Topic not found.")
+        if topic["number"] - 1 > profile["currentTopicIndex"]:
+            raise HTTPException(
+                status_code=403,
+                detail="This topic is still locked. Complete earlier topics first.",
+            )
+    else:
+        topic = _current_topic(profile)
+
+    is_practice = _topic_is_completed(profile, topic["id"])
+    for old_id, old_session in list(_LESSON_SESSIONS.items()):
+        if old_session["userId"] == req.userId:
+            _drop_session(old_id)
+
+    score = profile["score"]
+    difficulty = _difficulty_for_score(score)
+    plan = _build_lesson_plan(topic, difficulty)
+    history = list(_topic_history(profile, topic["id"]))
+    lesson_id = f"lesson_{uuid.uuid4().hex[:12]}"
+    first_question = await _generate_question(
+        topic=topic,
+        score=score,
+        difficulty=difficulty,
+        question_number=1,
+        previous_questions=[],
+        plan=plan[0],
+        history=history,
+    )
+
+    _LESSON_SESSIONS[lesson_id] = {
+        "lessonId": lesson_id,
+        "userId": req.userId,
+        "topicId": topic["id"],
+        "topicTitle": topic["title"],
+        "topicNumber": topic["number"],
+        "scoreAtStart": score,
+        "difficulty": difficulty,
+        "plan": plan,
+        "weakQueue": [],
+        "questions": {first_question["questionId"]: first_question},
+        "questionTexts": [first_question["prompt"]],
+        "questionNumber": 1,
+        "correctAnswers": 0,
+        "answers": [],
+        "isPractice": is_practice,
+        "startedAt": _now_iso(),
+        "lastActivityEpoch": time.time(),
+        "status": "IN_PROGRESS",
+    }
+    profile["topicAttempts"][topic["id"]] = profile["topicAttempts"].get(topic["id"], 0) + 1
+    _remember_question(profile, topic["id"], first_question["prompt"])
+    profile["updatedAt"] = _now_iso()
+    _save_progress(_PROGRESS_STORE)
+
+    logger.info(
+        "Started lesson %s for user=%s topic=%s score=%s difficulty=%s attempt=%s",
+        lesson_id,
+        req.userId,
+        topic["id"],
+        score,
+        difficulty,
+        profile["topicAttempts"][topic["id"]],
+    )
+    return {
+        "lessonId": lesson_id,
+        "topic": _topic_summary(topic),
+        "score": score,
+        "scoreName": _score_name(score),
+        "difficulty": difficulty,
+        "difficultyLabel": _difficulty_label(difficulty),
+        "attempt": profile["topicAttempts"][topic["id"]],
+        "isPractice": is_practice,
+        "questionNumber": 1,
+        "totalQuestions": QUESTIONS_PER_LESSON,
+        "correctAnswers": 0,
+        "requiredCorrect": PASS_THRESHOLD,
+        "question": _public_question(first_question),
+    }
+
+
+@app.post("/api/learning/lesson/answer")
+async def answer_lesson(req: LessonAnswerRequest) -> Dict[str, Any]:
+    session = _LESSON_SESSIONS.get(req.lessonId)
+    if not session:
+        raise HTTPException(status_code=404, detail="Lesson session not found. Start a new lesson.")
+    async with _session_lock(req.lessonId):
+        return await _process_answer(req, session)
+
+
+async def _process_answer(
+    req: LessonAnswerRequest,
+    session: Dict[str, Any],
+) -> Dict[str, Any]:
+    if session["userId"] != req.userId:
+        raise HTTPException(status_code=403, detail="This lesson does not belong to this user.")
+    if session["status"] != "IN_PROGRESS":
+        raise HTTPException(status_code=409, detail="This lesson has already been completed.")
+
+    question = session["questions"].get(req.questionId)
+    if not question:
+        raise HTTPException(status_code=404, detail="Question not found in this lesson.")
+    answered_ids = {answer["questionId"] for answer in session["answers"]}
+    if req.questionId in answered_ids:
+        raise HTTPException(status_code=409, detail="This question has already been answered.")
+
+    topic = _find_topic(session["topicId"])
+    if topic is None:
+        raise HTTPException(status_code=500, detail="Lesson topic could not be found.")
+
+    question_number = session["questionNumber"]
+    profile = _get_profile(req.userId)
+    is_correct = req.selectedOptionId == question["correctOptionId"]
+    pending_weak_queue = list(session["weakQueue"])
+    next_question = None
+    if not is_correct:
+        focus = question.get("focus")
+        if focus and focus not in pending_weak_queue and len(pending_weak_queue) < 3:
+            pending_weak_queue.append(focus)
+
+    if question_number < QUESTIONS_PER_LESSON:
+        next_plan = dict(session["plan"][question_number])
+        weak_focus = next(
+            (focus for focus in pending_weak_queue if focus != question.get("focus")),
+            None,
+        )
+        if weak_focus:
+            pending_weak_queue.remove(weak_focus)
+            next_plan.update(
+                {
+                    "subtopic": weak_focus,
+                    "isReview": True,
+                    "angle": random.choice(QUESTION_ANGLES),
+                }
+            )
+        history = _topic_history(profile, topic["id"])
+        next_question = await _generate_question(
+            topic=topic,
+            score=session["scoreAtStart"],
+            difficulty=session["difficulty"],
+            question_number=question_number + 1,
+            previous_questions=session["questionTexts"],
+            plan=next_plan,
+            history=[item for item in history if item not in session["questionTexts"]],
+        )
+
+    session["lastActivityEpoch"] = time.time()
+    if is_correct:
+        session["correctAnswers"] += 1
+    session["answers"].append(
+        {
+            "questionId": req.questionId,
+            "selectedOptionId": req.selectedOptionId,
+            "isCorrect": is_correct,
+            "focus": question.get("focus"),
+            "answeredAt": _now_iso(),
+        }
+    )
+    session["weakQueue"] = pending_weak_queue
+    profile["totalQuestions"] += 1
+    profile["lastAnsweredAt"] = _now_iso()
+    if is_correct:
+        profile["correctAnswers"] += 1
+        profile["streak"] += 1
+        profile["bestStreak"] = max(profile["bestStreak"], profile["streak"])
+    else:
+        profile["streak"] = 0
+
+    if next_question is not None:
+        session["questions"][next_question["questionId"]] = next_question
+        session["questionTexts"].append(next_question["prompt"])
+        session["questionNumber"] = question_number + 1
+        _remember_question(profile, topic["id"], next_question["prompt"])
+        profile["updatedAt"] = _now_iso()
+        _save_progress(_PROGRESS_STORE)
+        return {
+            "correct": is_correct,
+            "selectedOptionId": req.selectedOptionId,
+            "correctOptionId": question["correctOptionId"],
+            "explanation": question["explanation"],
+            "learningTip": question["learningTip"],
+            "questionNumber": question_number,
+            "totalQuestions": QUESTIONS_PER_LESSON,
+            "correctAnswers": session["correctAnswers"],
+            "questionsRemaining": QUESTIONS_PER_LESSON - question_number,
+            "currentStreak": profile["streak"],
+            "lessonComplete": False,
+            "nextQuestion": _public_question(next_question),
+        }
+
+    session["status"] = "COMPLETED"
+    session["completedAt"] = _now_iso()
+    profile["totalLessonsCompleted"] += 1
+    _update_day_streak(profile)
+    correct = session["correctAnswers"]
+    percentage = int((correct / QUESTIONS_PER_LESSON) * 100)
+    passed = correct >= PASS_THRESHOLD
+    old_score = profile["score"]
+    xp_earned = correct * (5 if session.get("isPractice") and not passed else 10)
+    if correct == QUESTIONS_PER_LESSON:
+        xp_earned += 20
+
+    best_score = profile["topicBestScores"].get(topic["id"], 0)
+    profile["topicBestScores"][topic["id"]] = max(best_score, correct)
+    if passed:
+        profile["lessonsPassed"] += 1
+        xp_earned += 50
+        if topic["id"] not in profile["completedTopics"]:
+            profile["completedTopics"].append(topic["id"])
+            if profile["score"] < 10:
+                profile["score"] += 1
+            if profile["currentTopicIndex"] == topic["number"] - 1:
+                profile["currentTopicIndex"] += 1
+
+    profile["xp"] += xp_earned
+    profile["updatedAt"] = _now_iso()
+    _save_progress(_PROGRESS_STORE)
+    _drop_session(req.lessonId)
+
+    mistakes = []
+    weak_areas = []
+    for answer in session["answers"]:
+        if answer["isCorrect"]:
+            continue
+        missed = session["questions"][answer["questionId"]]
+        mistakes.append(
+            {
+                "prompt": missed["prompt"],
+                "yourAnswer": _option_text(missed, answer["selectedOptionId"]),
+                "correctAnswer": _option_text(missed, missed["correctOptionId"]),
+                "explanation": missed["explanation"],
+                "focus": missed.get("focus", ""),
+            }
+        )
+        focus = missed.get("focus")
+        if focus and focus not in weak_areas:
+            weak_areas.append(focus)
+
+    all_completed = profile["currentTopicIndex"] >= len(CURRICULUM)
+    next_topic = None if all_completed else _topic_summary(_current_topic(profile))
+    message = (
+        f"Great job! You passed {topic['title']}."
+        if passed
+        else (
+            f"You scored {correct}/{QUESTIONS_PER_LESSON}. You need "
+            f"{PASS_THRESHOLD}/{QUESTIONS_PER_LESSON} to unlock the next topic. "
+            "Your next attempt will have all-new questions."
+        )
+    )
+    logger.info(
+        "Lesson completed: user=%s topic=%s result=%s score=%s->%s",
+        req.userId,
+        topic["title"],
+        "PASS" if passed else "FAIL",
+        old_score,
+        profile["score"],
+    )
+    return {
+        "correct": is_correct,
+        "selectedOptionId": req.selectedOptionId,
+        "correctOptionId": question["correctOptionId"],
+        "explanation": question["explanation"],
+        "learningTip": question["learningTip"],
+        "questionNumber": QUESTIONS_PER_LESSON,
+        "totalQuestions": QUESTIONS_PER_LESSON,
+        "correctAnswers": correct,
+        "percentage": percentage,
+        "lessonComplete": True,
+        "passed": passed,
+        "requiredCorrect": PASS_THRESHOLD,
+        "xpEarned": xp_earned,
+        "totalXp": profile["xp"],
+        "scoreBefore": old_score,
+        "scoreAfter": profile["score"],
+        "scoreName": _score_name(profile["score"]),
+        "scoreIncreased": profile["score"] > old_score,
+        "topicCompleted": passed,
+        "retryRequired": not passed,
+        "allTopicsCompleted": all_completed,
+        "dayStreak": profile["dayStreak"],
+        "weakAreas": weak_areas,
+        "mistakes": mistakes,
+        "nextTopic": next_topic,
+        "message": message,
+    }
+
+
+_LEVEL_MAP = {
+    1: "novice", 2: "beginner", 3: "beginner_plus", 4: "intermediate",
+    5: "intermediate_plus", 6: "advanced", 7: "advanced_plus",
+    8: "expert", 9: "expert_plus", 10: "master",
+}
+
+_LEVEL_CONFIG = {
+    1: {"label": "Newbie", "word_limit": 40, "prompt": "Explain very simply for someone who has never invested. Avoid jargon."},
+    2: {"label": "Beginner", "word_limit": 60, "prompt": "Explain using basic investing concepts and define important terms."},
+    3: {"label": "Beginner+", "word_limit": 70, "prompt": "Explain the concept with a simple stock-market example."},
+    4: {"label": "Intermediate", "word_limit": 80, "prompt": "Explain using standard investing terminology."},
+    5: {"label": "Intermediate+", "word_limit": 90, "prompt": "Connect multiple investing concepts."},
+    6: {"label": "Advanced", "word_limit": 100, "prompt": "Explain technical and quantitative implications."},
+    7: {"label": "Advanced+", "word_limit": 110, "prompt": "Use multi-factor market reasoning."},
+    8: {"label": "Expert", "word_limit": 120, "prompt": "Use advanced technical and quantitative concepts."},
+    9: {"label": "Expert+", "word_limit": 130, "prompt": "Use advanced quantitative reasoning."},
+    10: {"label": "Master", "word_limit": 140, "prompt": "Use expert-level quantitative market reasoning."},
+}
+
+def _level_config(level: int) -> Dict[str, Any]:
+    return _LEVEL_CONFIG.get(level, _LEVEL_CONFIG[2])
+
+
+# ============================================================================
+# XAI EXPLANATION
+# ============================================================================
+
+@app.post("/api/learning/xai/explain")
+async def xai_explain(req: XaiExplainRequest) -> Dict[str, Any]:
+
+    cfg = _level_config(req.xaiLevel)
+    used_gemini = False
+
+    if _gemini_client:
+        try:
+            prompt = f"""
+            Explain this stock-analysis result educationally.
+
+            Ticker: {req.ticker}
+            Decision: {req.decision}
+
+            RSI: {req.features.rsi}
+            MA5: {req.features.ma5}
+            MA10: {req.features.ma10}
+            Volatility: {req.features.volatility}
+            Sentiment: {req.features.sentimentScore}
+            Market mood: {req.features.marketMood}
+            Confidence: {req.features.confidence}
+
+            Learner level: {cfg["label"]}
+
+            Instructions:
+                {cfg["prompt"]}
+
+                This is educational content, not personalized financial advice.
+                Maximum {cfg["word_limit"]} words.
+                """
+
+            response = await asyncio.to_thread(
+                _gemini_client.models.generate_content,
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+
+            text = response.text.strip()
+            used_gemini = True
+
+        except Exception as exc:
+            logger.error("XAI generation failed: %s", exc)
+            text = _det_xai(req)
+
+    else:
+        text = _det_xai(req)
+
+    return {
+        "ticker": req.ticker,
+        "decision": req.decision,
+        "summary": text,
+        "detailedExplanation": text,
+        "explanationDepth": _LEVEL_MAP.get(
+            req.xaiLevel,
+            "beginner",
+        ),
+        "generatedBy": (
+            "gemini"
+            if used_gemini
+            else "deterministic_fallback"
+        ),
+        "generatedAt": _now_iso(),
+    }
+
+
+def _det_xai(req: XaiExplainRequest) -> str:
+
+    f = req.features
+
+    rsi_description = (
+        "RSI is relatively high"
+        if f.rsi > 70
+        else
+        "RSI is relatively low"
+        if f.rsi < 30
+        else
+        "RSI is in a more neutral range"
+    )
+
+    trend = (
+        "MA5 is above MA10"
+        if f.ma5 > f.ma10
+        else
+        "MA5 is below MA10"
+    )
+
+    return (
+        f"{req.ticker} has a {req.decision} signal. "
+        f"{rsi_description}, while {trend}. "
+        f"Market sentiment is {f.marketMood.lower()} "
+        f"with a sentiment score of {f.sentimentScore:+.2f}."
+    )
+
+
+# ============================================================================
+# DASHBOARD
+# ============================================================================
+
 @app.get("/api/dashboard")
 async def get_dashboard():
-    """Snake_case keys matching Flutter DashboardMetrics.fromJson."""
-    return {"portfolio_value": 124500.80, "daily_change": 1250.40, "weekly_change": 5430.20,
-            "xp_points": 2450, "user_level": 2, "win_rate": 0.68, "next_level_milestone": "3500 XP"}
+
+    return {
+        "portfolio_value": 124500.80,
+        "daily_change": 1250.40,
+        "weekly_change": 5430.20,
+        "xp_points": 2450,
+        "user_level": 2,
+        "win_rate": 0.68,
+        "next_level_milestone": "3500 XP",
+    }
 
 
-_ASSETS_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": []}
+# ============================================================================
+# MARKET DATA
+# ============================================================================
+
+_ASSETS_CACHE: Dict[str, Any] = {
+    "timestamp": 0.0,
+    "data": [],
+}
+
+
+def _seed_asset(sym: str) -> Dict[str, Any]:
+
+    seeds = {
+        "NVDA": {
+            "status": "BUY",
+            "confidence": "84%",
+            "sentiment": "0.78",
+            "rsi": 48.2,
+            "price": 128.50,
+            "changePercent": 3.42,
+            "insight": "NVDA shows strong momentum with bullish sentiment.",
+        },
+        "AAPL": {
+            "status": "HOLD",
+            "confidence": "71%",
+            "sentiment": "-0.12",
+            "rsi": 55.1,
+            "price": 224.20,
+            "changePercent": -0.85,
+            "insight": "AAPL has relatively neutral momentum.",
+        },
+        "TSLA": {
+            "status": "BUY",
+            "confidence": "76%",
+            "sentiment": "0.45",
+            "rsi": 42.3,
+            "price": 210.10,
+            "changePercent": 5.15,
+            "insight": "TSLA shows improving momentum.",
+        },
+        "MSFT": {
+            "status": "HOLD",
+            "confidence": "68%",
+            "sentiment": "0.22",
+            "rsi": 58.7,
+            "price": 415.30,
+            "changePercent": 0.62,
+            "insight": "MSFT has moderate bullish sentiment.",
+        },
+        "AMD": {
+            "status": "SELL",
+            "confidence": "79%",
+            "sentiment": "-0.34",
+            "rsi": 68.4,
+            "price": 152.80,
+            "changePercent": -2.10,
+            "insight": "AMD shows elevated downside risk.",
+        },
+    }
+
+    base = seeds.get(
+        sym,
+        {
+            "status": "HOLD",
+            "confidence": "60%",
+            "sentiment": "0.00",
+            "rsi": 50.0,
+            "price": 100.0,
+            "changePercent": 0.0,
+            "insight": f"{sym} - insufficient live data.",
+        },
+    )
+
+    return {
+        "ticker": sym,
+        **base,
+    }
+
+
+def _asset_insight(
+    ticker: str,
+    status: str,
+    rsi: float,
+    sentiment: float,
+) -> str:
+
+    mood = (
+        "bullish"
+        if sentiment > 0.1
+        else
+        "bearish"
+        if sentiment < -0.1
+        else
+        "neutral"
+    )
+
+    return (
+        f"{ticker}: RSI {rsi:.0f}, "
+        f"{mood} sentiment and {status} signal."
+    )
+
 
 def _fetch_yfinance_assets() -> List[Dict[str, Any]]:
-    tickers = ["NVDA", "AAPL", "TSLA", "MSFT", "AMD"]
+
+    tickers = [
+        "NVDA",
+        "AAPL",
+        "TSLA",
+        "MSFT",
+        "AMD",
+    ]
+
     try:
         import yfinance as yf
+
         assets = []
-        for sym in tickers:
+
+        for symbol in tickers:
             try:
-                hist = yf.Ticker(sym).history(period="5d")
-                if hist.empty: raise ValueError("empty")
-                close = hist["Close"].dropna()
+                history = yf.Ticker(symbol).history(
+                    period="5d"
+                )
+
+                if history.empty:
+                    raise ValueError("No market data returned.")
+
+                close = history["Close"].dropna()
+
                 price = float(close.iloc[-1])
-                prev  = float(close.iloc[-2]) if len(close) >= 2 else price
-                chg   = ((price - prev) / prev) * 100
-                d     = close.diff()
-                gain  = d.where(d > 0, 0).mean()
-                loss  = (-d.where(d < 0, 0)).mean()
-                rsi   = round(100 - 100 / (1 + gain / loss), 1) if loss else 50.0
-                if rsi < 35 and chg > 0:   status, conf = "BUY",  f"{min(95, 60+int(35-rsi))}%"
-                elif rsi > 65 and chg < 0: status, conf = "SELL", f"{min(95, 60+int(rsi-65))}%"
-                else:                       status, conf = "HOLD", f"{max(50, 80-int(abs(rsi-50)))}%"
-                sent = round(chg / 10, 2)
-                assets.append({"ticker": sym, "status": status, "confidence": conf,
-                                "sentiment": str(sent), "rsi": rsi, "price": round(price,2),
-                                "changePercent": round(chg,2), "insight": _asset_insight(sym,status,rsi,sent)})
-            except Exception as e:
-                logger.warning("yfinance %s: %s - seed", sym, e)
-                assets.append(_seed_asset(sym))
+
+                previous = (
+                    float(close.iloc[-2])
+                    if len(close) >= 2
+                    else price
+                )
+
+                change = (
+                    ((price - previous) / previous) * 100
+                    if previous
+                    else 0
+                )
+
+                difference = close.diff()
+
+                gain = difference.where(
+                    difference > 0,
+                    0,
+                ).mean()
+
+                loss = (
+                    -difference.where(
+                        difference < 0,
+                        0,
+                    )
+                ).mean()
+
+                rsi = (
+                    round(
+                        100 - 100 / (1 + gain / loss),
+                        1,
+                    )
+                    if loss
+                    else 50.0
+                )
+
+                if rsi < 35 and change > 0:
+                    status = "BUY"
+                    confidence = f"{min(95, 60 + int(35 - rsi))}%"
+
+                elif rsi > 65 and change < 0:
+                    status = "SELL"
+                    confidence = f"{min(95, 60 + int(rsi - 65))}%"
+
+                else:
+                    status = "HOLD"
+                    confidence = f"{max(50, 80 - int(abs(rsi - 50)))}%"
+
+                sentiment = round(change / 10, 2)
+
+                assets.append(
+                    {
+                        "ticker": symbol,
+                        "status": status,
+                        "confidence": confidence,
+                        "sentiment": str(sentiment),
+                        "rsi": rsi,
+                        "price": round(price, 2),
+                        "changePercent": round(change, 2),
+                        "insight": _asset_insight(
+                            symbol,
+                            status,
+                            rsi,
+                            sentiment,
+                        ),
+                    }
+                )
+
+            except Exception as exc:
+                logger.warning(
+                    "yfinance %s failed: %s",
+                    symbol,
+                    exc,
+                )
+
+                assets.append(
+                    _seed_asset(symbol)
+                )
+
         return assets
-    except Exception as e:
-        logger.warning("yfinance error: %s - fallback", e)
-        return [_seed_asset(s) for s in tickers]
+
+    except Exception as exc:
+        logger.warning(
+            "yfinance unavailable: %s",
+            exc,
+        )
+
+        return [
+            _seed_asset(symbol)
+            for symbol in tickers
+        ]
 
 
 @app.get("/api/assets")
 async def get_assets():
-    """Live yfinance market data with 60s cache and fast fallback.
-    Non-blocking to avoid stalling concurrent Flutter requests."""
+
     now = time.time()
-    if _ASSETS_CACHE["data"] and (now - _ASSETS_CACHE["timestamp"]) < 60.0:
+
+    if (
+        _ASSETS_CACHE["data"]
+        and now - _ASSETS_CACHE["timestamp"] < 60
+    ):
         return _ASSETS_CACHE["data"]
 
-    tickers = ["NVDA", "AAPL", "TSLA", "MSFT", "AMD"]
+    tickers = [
+        "NVDA",
+        "AAPL",
+        "TSLA",
+        "MSFT",
+        "AMD",
+    ]
+
     try:
-        data = await asyncio.wait_for(asyncio.to_thread(_fetch_yfinance_assets), timeout=2.5)
+
+        data = await asyncio.wait_for(
+            asyncio.to_thread(
+                _fetch_yfinance_assets
+            ),
+            timeout=3,
+        )
+
         _ASSETS_CACHE["data"] = data
         _ASSETS_CACHE["timestamp"] = now
-        return data
-    except Exception as err:
-        logger.warning("yfinance fetch took >2.5s or error: %s. Using seed fallback.", err)
-        seed_data = [_seed_asset(s) for s in tickers]
-        if not _ASSETS_CACHE["data"]:
-            _ASSETS_CACHE["data"] = seed_data
-            _ASSETS_CACHE["timestamp"] = now
-        return _ASSETS_CACHE["data"] or seed_data
 
+        return data
+
+    except Exception as exc:
+
+        logger.warning(
+            "Market data timeout: %s",
+            exc,
+        )
+
+        fallback = [
+            _seed_asset(symbol)
+            for symbol in tickers
+        ]
+
+        if not _ASSETS_CACHE["data"]:
+            _ASSETS_CACHE["data"] = fallback
+            _ASSETS_CACHE["timestamp"] = now
+
+        return _ASSETS_CACHE["data"] or fallback
+
+
+        # ============================================================================
+        # PORTFOLIO
+        # ============================================================================
 
 @app.get("/api/portfolio")
 async def get_portfolio():
-    """Flat list matching Flutter PortfolioHolding.fromJson."""
+
     return [
-        {"symbol":"NVDA","name":"NVIDIA Corporation","quantity":5.0,
-         "current_price":128.50,"total_value":642.50,"day_change":21.50,"allocation":"47.7%"},
-        {"symbol":"AAPL","name":"Apple Inc.","quantity":3.0,
-         "current_price":224.20,"total_value":672.60,"day_change":-7.65,"allocation":"49.9%"},
-        {"symbol":"CASH","name":"Cash Reserve","quantity":1.0,
-         "current_price":32.00,"total_value":32.00,"day_change":0.0,"allocation":"2.4%"},
+        {
+            "symbol": "NVDA",
+            "name": "NVIDIA Corporation",
+            "quantity": 5.0,
+            "current_price": 128.50,
+            "total_value": 642.50,
+            "day_change": 21.50,
+            "allocation": "47.7%",
+        },
+        {
+            "symbol": "AAPL",
+            "name": "Apple Inc.",
+            "quantity": 3.0,
+            "current_price": 224.20,
+            "total_value": 672.60,
+            "day_change": -7.65,
+            "allocation": "49.9%",
+        },
+        {
+            "symbol": "CASH",
+            "name": "Cash Reserve",
+            "quantity": 1.0,
+            "current_price": 32.00,
+            "total_value": 32.00,
+            "day_change": 0.0,
+            "allocation": "2.4%",
+        },
     ]
 
+
+# ============================================================================
+# FACTORS
+# ============================================================================
 
 @app.get("/api/factors")
 async def get_factors():
-    """Fields matching Flutter FactorImpact.fromJson."""
+
     return [
-        {"name":"Technical Momentum","weight":"38%","percentage":0.38,"code":"TM","color":"blue"},
-        {"name":"NLP Sentiment",     "weight":"31%","percentage":0.31,"code":"NS","color":"emerald"},
-        {"name":"Volatility Risk",   "weight":"19%","percentage":0.19,"code":"VR","color":"amber"},
-        {"name":"Macro Correlation", "weight":"12%","percentage":0.12,"code":"MC","color":"rose"},
+        {
+            "name": "Technical Momentum",
+            "weight": "38%",
+            "percentage": 0.38,
+            "code": "TM",
+            "color": "blue",
+        },
+        {
+            "name": "NLP Sentiment",
+            "weight": "31%",
+            "percentage": 0.31,
+            "code": "NS",
+            "color": "emerald",
+        },
+        {
+            "name": "Volatility Risk",
+            "weight": "19%",
+            "percentage": 0.19,
+            "code": "VR",
+            "color": "amber",
+        },
+        {
+            "name": "Macro Correlation",
+            "weight": "12%",
+            "percentage": 0.12,
+            "code": "MC",
+            "color": "rose",
+        },
     ]
 
 
+# ============================================================================
+# EDUCATIONAL ASSISTANT
+# ============================================================================
+
 @app.post("/api/assistant")
-async def assistant_chat(req: AssistantQuery) -> Dict[str, Any]:
-    """Gemini educational assistant, adapts to level 1-5."""
-    cfg = _level_config(req.level or 2)
-    depth = _level_name(req.level or 2)
+async def assistant_chat(
+    req: AssistantQuery,
+) -> Dict[str, Any]:
+
+    level = req.level or 2
+
+    cfg = _level_config(
+        max(1, min(level, 10))
+    )
+
     if _gemini_client:
+
         try:
-            prompt = (f"You are QuantEdge Assistant, an educational AI for young investors.\n"
-                      f"User skill level: {cfg['label']}.\n{cfg['prompt']}\n"
-                      f"Rules: educational only, no real financial advice, max {cfg['word_limit']} words.\n\n"
-                      f"User: {req.query}")
-            resp = _gemini_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-            reply = resp.text.strip()
+
+            prompt = f"""
+            You are the QuantEdge educational assistant.
+
+            Learner level: {cfg["label"]}
+
+            Explain: {cfg["prompt"]}
+
+            Rules:
+                - Educational content only.
+                - Do not provide personalized financial advice.
+                - Explain stock-market concepts clearly.
+                - Maximum {cfg["word_limit"]} words.
+
+                User question:
+                    {req.query}
+                    """
+
+            response = await asyncio.to_thread(
+                _gemini_client.models.generate_content,
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+
+            reply = response.text.strip()
+
         except Exception as exc:
-            logger.error("Gemini assistant error: %s", exc)
-            reply = _det_assistant(req.query)
+
+            logger.error(
+                "Assistant Gemini error: %s",
+                exc,
+            )
+
+            reply = _det_assistant(
+                req.query
+            )
+
     else:
-        reply = _det_assistant(req.query)
-    return {"reply": reply, "timestamp": _now_iso(), "level": depth}
 
+        reply = _det_assistant(
+            req.query
+        )
 
-# --------------------------------------------------------------------------
-# Internal helpers
-# --------------------------------------------------------------------------
-def _asset_insight(ticker: str, status: str, rsi: float, sentiment: float) -> str:
-    mood = "bullish" if sentiment > 0.1 else "bearish" if sentiment < -0.1 else "neutral"
-    msgs = {"BUY": f"{ticker} RSI {rsi:.0f} (oversold) with {mood} sentiment - engine signals buying opportunity.",
-            "SELL": f"{ticker} RSI {rsi:.0f} (overbought) with {mood} sentiment - engine signals caution.",
-            "HOLD": f"{ticker} RSI {rsi:.0f} with {mood} sentiment - holding position recommended."}
-    return msgs.get(status, msgs["HOLD"])
-
-
-def _seed_asset(sym: str) -> Dict[str, Any]:
-    seeds = {
-        "NVDA":{"status":"BUY", "confidence":"84%","sentiment":"0.78", "rsi":48.2,"price":128.50,"changePercent":3.42,
-                "insight":"NVDA shows strong momentum with bullish sentiment backing the BUY signal."},
-        "AAPL":{"status":"HOLD","confidence":"71%","sentiment":"-0.12","rsi":55.1,"price":224.20,"changePercent":-0.85,
-                "insight":"AAPL RSI neutral at 55 with mildly bearish sentiment - hold recommended."},
-        "TSLA":{"status":"BUY", "confidence":"76%","sentiment":"0.45", "rsi":42.3,"price":210.10,"changePercent":5.15,
-                "insight":"TSLA recovering RSI with positive momentum - accumulation favoured."},
-        "MSFT":{"status":"HOLD","confidence":"68%","sentiment":"0.22", "rsi":58.7,"price":415.30,"changePercent":0.62,
-                "insight":"MSFT range-bound with moderate bullish sentiment - no strong signal."},
-        "AMD": {"status":"SELL","confidence":"79%","sentiment":"-0.34","rsi":68.4,"price":152.80,"changePercent":-2.10,
-                "insight":"AMD RSI approaching overbought with bearish sentiment - SELL signalled."},
+    return {
+        "reply": reply,
+        "timestamp": _now_iso(),
+        "level": cfg["label"],
     }
-    base = seeds.get(sym, {"status":"HOLD","confidence":"60%","sentiment":"0.00","rsi":50.0,
-                            "price":100.0,"changePercent":0.0,"insight":f"{sym} - insufficient live data."})
-    return {"ticker": sym, **base}
-
-
-async def _gemini_xai(req: XaiExplainRequest, cfg: Dict[str, Any]) -> str:
-    f = req.features
-    prompt = (f"QuantEdge XAI: RF model produced a {req.decision} for {req.ticker}.\n"
-              f"RSI:{f.rsi:.1f} MA5:{f.ma5:.2f} MA10:{f.ma10:.2f} Vol:{f.volatility:.4f} "
-              f"Sentiment:{f.sentimentScore:.3f}({f.marketMood}) Confidence:{f.confidence*100:.1f}%\n\n"
-              f"Audience:{cfg['label']}\n{cfg['prompt']}\nMax {cfg['word_limit']} words. Plain text only.")
-    try:
-        r = _gemini_client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-        return r.text.strip()
-    except Exception as exc:
-        logger.error("Gemini XAI error: %s", exc)
-        return _det_xai(req, _level_name(req.xaiLevel))
-
-
-def _det_xai(req: XaiExplainRequest, depth: str) -> str:
-    f = req.features
-    rsi_n = "RSI overbought" if f.rsi > 70 else ("RSI oversold" if f.rsi < 30 else f"RSI neutral at {f.rsi:.0f}")
-    ma_n  = "MA5 above MA10 (bullish)" if f.ma5 > f.ma10 else "MA5 below MA10 (bearish)"
-    s_n   = f"FinBERT {f.marketMood.lower()} ({f.sentimentScore:+.2f})"
-    div   = f.ma5 > f.ma10 and f.sentimentScore < -0.2
-    base  = f"{req.ticker} -> {req.decision} ({f.confidence*100:.0f}% conf). {rsi_n}. {ma_n}. {s_n}."
-
-    if depth == "novice":
-        d = {"BUY": f"Buy {req.ticker} - price signals look good and the mood is positive!",
-             "SELL": f"Sell {req.ticker} - negative news mood and weak price signals.",
-             "HOLD": f"Hold {req.ticker} - mixed signals, best to wait and see."}
-        return d.get(req.decision, d["HOLD"])
-    if depth == "beginner":
-        d = {"BUY":  f"{req.ticker} positive signals. Sentiment {f.sentimentScore:+.2f} (bullish) and price trend favourable.",
-             "SELL": f"{req.ticker} selling signals. Sentiment {f.sentimentScore:+.2f} (bearish) and price indicators weakening.",
-             "HOLD": f"{req.ticker} mixed. Sentiment {f.sentimentScore:+.2f} and technicals not clearly directional."}
-        return d.get(req.decision, d["HOLD"])
-    if depth == "intermediate": return base
-    if depth == "advanced":
-        dn = " Price-sentiment divergence: price bullish but sentiment negative - reversal risk." if div else ""
-        return f"{base} Vol:{f.volatility:.4f} ({'elevated' if f.volatility>0.02 else 'moderate'}).{dn}"
-    # expert
-    return (f"{base} Vol s={f.volatility:.4f}. SHAP: RSI~0.34, sentiment~0.28, MA5~0.21, Vol~0.12, MA10~0.05. "
-            f"{'Price-sentiment divergence -> alpha decay risk 1-3 sessions.' if div else 'Signals aligned.'}")
-
-
-def _feat_imp(f: XaiFeatures, decision: str) -> List[Dict[str, Any]]:
-    rsi_d  = "positive" if decision=="BUY" and f.rsi<70 else ("negative" if f.rsi>70 else "neutral")
-    sent_d = "positive" if f.sentimentScore>0.1 else ("negative" if f.sentimentScore<-0.1 else "neutral")
-    ma_d   = "positive" if f.ma5>f.ma10 else "negative"
-    return [{"feature":"RSI","importance":0.34,"direction":rsi_d},
-            {"feature":"sentimentScore","importance":0.28,"direction":sent_d},
-            {"feature":"MA5","importance":0.21,"direction":ma_d},
-            {"feature":"Volatility","importance":0.12,"direction":"neutral"},
-            {"feature":"MA10","importance":0.05,"direction":ma_d}]
-
-
-def _headline(ticker: str, decision: str, f: XaiFeatures) -> str:
-    icon = {"Bullish":"up","Bearish":"down","Neutral":"flat"}.get(f.marketMood,"flat")
-    return f"{ticker}: {decision} - {f.confidence*100:.0f}% conf. Sentiment {icon} {f.sentimentScore:+.2f}"
-
-
-def _tooltip(ticker: str, decision: str, f: XaiFeatures, level: int) -> str:
-    div = f.ma5 > f.ma10 and f.sentimentScore < -0.2
-    if level <= 2:
-        if div:              return f"{ticker}'s price climbing but news mood dropping - signals out of sync."
-        if decision=="BUY":  return f"Engine confident about {ticker} - positive price and news signals."
-        if decision=="SELL": return f"Negative news and weak price driving SELL for {ticker}."
-        return f"{ticker} mixed signals - no strong reason to buy or sell."
-    if div:
-        return f"{ticker} price-sentiment divergence: MA5 {f.ma5:.2f}>MA10 {f.ma10:.2f} (bullish) but FinBERT {f.sentimentScore:+.2f} (bearish). High reversal risk."
-    if decision=="BUY":
-        return f"Strong {ticker} BUY. RSI {f.rsi:.0f}, {f.marketMood.lower()} sentiment ({f.sentimentScore:+.2f}), MA crossover confirmed. Confidence: {f.confidence*100:.0f}%."
-    if decision=="SELL":
-        return f"Bearish sentiment ({f.sentimentScore:+.2f}) overrides {ticker} technical support. RSI {f.rsi:.0f} declining MA - correction risk."
-    return f"Mixed for {ticker}. RSI {f.rsi:.0f}, sentiment {f.sentimentScore:+.2f} - no clear bias."
 
 
 def _det_assistant(query: str) -> str:
+
     q = query.lower()
-    if any(w in q for w in ["rsi","relative strength"]):
-        return "RSI measures momentum 0-100. Below 30 = oversold (potential buy). Above 70 = overbought (potential sell). QuantEdge uses RSI as a primary technical indicator."
-    if any(w in q for w in ["sentiment","finbert","news"]):
-        return "FinBERT classifies financial news as Bullish, Neutral, or Bearish. QuantEdge combines this with technical indicators to generate trading signals."
-    if any(w in q for w in ["volatility","risk","panic"]):
-        return "Volatility measures price fluctuation intensity. QuantEdge monitors 5-day rolling volatility and flags elevated risk automatically."
-    if any(w in q for w in ["moving average","golden cross","death cross"]):
-        return "Moving Averages smooth price data. A Golden Cross (MA5 above MA10) signals upward momentum. QuantEdge uses MA5 and MA10 as core trend indicators."
-    if any(w in q for w in ["buy","sell","hold","decision","signal"]):
-        return "QuantEdge combines RSI, MAs, volatility, and FinBERT to generate BUY/SELL/HOLD signals with confidence scores and level-appropriate explanations."
-    if any(w in q for w in ["xai","explainable","shap","model"]):
-        return "XAI reveals WHY the model made its decision. QuantEdge shows which features drove each signal and by how much."
-    return f"Great question about '{query}'! QuantEdge analyses indicators, sentiment, and volatility to help young investors understand markets. What would you like to explore?"
+
+    if "rsi" in q:
+        return (
+            "RSI is a momentum indicator ranging from 0 to 100. "
+            "Higher readings can indicate stronger recent momentum."
+        )
+
+    if "dividend" in q:
+        return (
+            "A dividend is a payment a company may distribute "
+            "to shareholders from its profits."
+        )
+
+    if "pe ratio" in q or "p/e" in q:
+        return (
+            "The P/E ratio compares a company's share price "
+            "with its earnings per share."
+        )
+
+    if "volatility" in q:
+        return (
+            "Volatility describes how much an asset's price "
+            "moves over time."
+        )
+
+    if "market cap" in q:
+        return (
+            "Market capitalization is the total market value "
+            "of a company's outstanding shares."
+        )
+
+    return (
+        f"That's a good question about {query}. "
+        "QuantEdge can help you explore the concept step by step."
+    )
+
+
+# ============================================================================
+# HEALTH CHECK
+# ============================================================================
+
+@app.get("/api/learning/health")
+async def learning_health():
+
+    return {
+        "status": "ok",
+        "service": "QuantEdge Learning Engine",
+        "version": "3.1.0",
+        "llmConfigured": _groq_client is not None,
+        "explainerConfigured": _gemini_client is not None,
+        "totalTopics": len(CURRICULUM),
+        "questionsPerLesson": QUESTIONS_PER_LESSON,
+        "passingScore": 80,
+        "scoreRange": "1-10",
+        "activeLessons": len(_LESSON_SESSIONS),
+    }
+
+
+# ============================================================================
+# STARTUP LOG
+# ============================================================================
+
+@app.on_event("startup")
+async def startup_event():
+
+    logger.info("=" * 60)
+    logger.info("QuantEdge Learning Engine v3.1")
+    logger.info("=" * 60)
+    logger.info(
+        "LLM configured: %s",
+        _groq_client is not None,
+    )
+    logger.info(
+        "Curriculum topics: %s",
+        len(CURRICULUM),
+    )
+    logger.info(
+        "Questions per lesson: %s",
+        QUESTIONS_PER_LESSON,
+    )
+    logger.info(
+        "Passing requirement: %s/%s",
+        PASS_THRESHOLD,
+        QUESTIONS_PER_LESSON,
+    )
+    logger.info(
+        "Learning path ready."
+    )
+    logger.info("=" * 60)

@@ -1,0 +1,76 @@
+{
+  "disha_test": {
+    "userId": "disha_test",
+    "score": 3,
+    "xp": 0,
+    "currentTopicIndex": 5,
+    "completedTopics": [],
+    "topicAttempts": {
+      "valuation": 1,
+      "stock_basics": 1
+    },
+    "topicBestScores": {},
+    "questionHistory": {
+      "valuation": [
+        "If a company\u2019s price\u2011to\u2011earnings (P/E) ratio is 10 and its earnings per share (EPS) is $5, what is the stock\u2019s price?",
+        "Which statement correctly describes the relationship between EPS and a company\u2019s profitability?"
+      ],
+      "stock_basics": [
+        "A company sells 10,000 shares of stock at $5 each. If you buy 200 shares, how much do you pay?"
+      ]
+    },
+    "totalLessonsCompleted": 0,
+    "lessonsPassed": 0,
+    "totalQuestions": 1,
+    "correctAnswers": 1,
+    "streak": 1,
+    "bestStreak": 1,
+    "dayStreak": 0,
+    "lastActiveDate": null,
+    "onboarded": true,
+    "onboardingLevel": "intermediate",
+    "lastAnsweredAt": "2026-10-10T15:45:43.550142+00:00",
+    "createdAt": "2026-10-10T15:20:24.352342+00:00",
+    "updatedAt": "2026-10-10T15:47:06.716125+00:00"
+  },
+  "disha1_test": {
+    "userId": "disha1_test",
+    "score": 3,
+    "xp": 60,
+    "currentTopicIndex": 5,
+    "completedTopics": [],
+    "topicAttempts": {
+      "stock_basics": 1
+    },
+    "topicBestScores": {
+      "stock_basics": 6
+    },
+    "questionHistory": {
+      "stock_basics": [
+        "Which of the following statements about owning a share of stock is NOT true?",
+        "A stock bought for $20 is sold later for $30. Which statement correctly describes the gain?",
+        "AAPL shares were trading at $150 a share. Over the next week the price rose to $155 on a day with 10 million shares traded, then fell to $152 on a day with 8 million shares traded. What does this pattern most suggest about the market\u2019s view of Apple\u2019s future earnings?",
+        "Which of the following best explains why a company like Tesla might choose to issue new shares instead of borrowing money to fund a new factory?",
+        "If a company issues a new share of stock, what is the most immediate effect on the ownership structure of its existing shareholders?",
+        "A startup has 4\u202fmillion shares outstanding. It issues 1\u202fmillion new shares at $5 each to raise capital. After the issuance, what percentage of the company does each original share represent compared to before?",
+        "A company\u2019s stock price has been trading at $25 for several days. One day the price jumps to $30, and the trading volume that day is 15 million shares. The next day the price falls back to $27, but the volume drops to 5 million shares. Which statement best describes what this pattern suggests about investor sentiment?",
+        "TechCo plans to raise capital by issuing new shares. The company currently has 2\u202fmillion shares outstanding at a price of $30 per share. It wants to raise $18\u202fmillion. How many new shares should it issue, and what will be the new price per share after the issuance if the market price adjusts to reflect the new total value?",
+        "TechCo owns 1,000,000 shares at $50 each. An investor buys 10,000 shares at that price. After the purchase, TechCo\u2019s share price rises to $52. What does the investor\u2019s profit represent?",
+        "A software firm, SoftTech, decides to issue 500,000 new shares at $20 each to fund the development of a new product line. On the first day of trading the new shares, the price jumps to $25 and the trading volume reaches 3 million shares. The next day, the price falls to $22 and volume drops to 1.5 million shares. What does this pattern most suggest about SoftTech\u2019s decision to issue new shares?"
+      ]
+    },
+    "totalLessonsCompleted": 1,
+    "lessonsPassed": 0,
+    "totalQuestions": 10,
+    "correctAnswers": 6,
+    "streak": 0,
+    "bestStreak": 3,
+    "dayStreak": 1,
+    "lastActiveDate": "2026-10-10",
+    "onboarded": true,
+    "onboardingLevel": "intermediate",
+    "lastAnsweredAt": "2026-10-10T16:49:56.692685+00:00",
+    "createdAt": "2026-10-10T15:53:17.032394+00:00",
+    "updatedAt": "2026-10-10T16:49:56.693123+00:00"
+  }
+}

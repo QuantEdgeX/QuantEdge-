@@ -1,283 +1,562 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/quiz_provider.dart';
+
+import '../providers/learning_provider.dart' show LearningProvider;
+import '../providers/quiz_provider.dart' show QuizProvider;
 import '../theme/app_theme.dart';
 
-class OnboardingQuizScreen extends StatelessWidget {
+/// Duolingo-style onboarding: a few questions about the learner's current
+/// stock-market knowledge, then a choice of where to start. The answers
+/// decide how many Learn topics are unlocked.
+class OnboardingQuizScreen extends StatefulWidget {
   const OnboardingQuizScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final quizProvider = context.watch<QuizProvider>();
-    final isDark = quizProvider.isDarkMode;
-    final textColor = isDark ? Colors.white : AppColors.lightTextPrimary;
+  State<OnboardingQuizScreen> createState() => _OnboardingQuizScreenState();
+}
 
-    if (quizProvider.isLoadingQuiz && quizProvider.currentQuestion == null) {
-      return const Center(
-        child: CircularProgressIndicator(color: AppColors.emerald),
-      );
+class _Opt {
+  final String title;
+  final String? subtitle;
+  final String? emoji;
+
+  const _Opt(this.title, {this.subtitle, this.emoji});
+}
+
+class _OnboardingQuizScreenState extends State<OnboardingQuizScreen> {
+  static const int _lastStep = 3;
+
+  // Mirrors the backend curriculum order (used for the "start at my level" card).
+  static const List<String> _topicTitles = [
+    'Stock Market Basics',
+    'Stock Ownership & Exchanges',
+    'Stock Prices & Market Capitalization',
+    'Reading Stock Charts',
+    'Fundamental Analysis',
+    'Valuation Ratios',
+    'Dividends & Growth Investing',
+    'Technical Analysis',
+    'Risk Management',
+    'Portfolio Diversification',
+    'Market News & Sentiment',
+    'Earnings & Company Events',
+    'Trading & Market Mechanics',
+    'Advanced Investing Concepts',
+    'Quantitative & AI Investing',
+  ];
+
+  static const List<_Opt> _knowledgeOptions = [
+    _Opt("I'm new to stocks"),
+    _Opt('I know some basic terms'),
+    _Opt('I can read charts and ratios'),
+    _Opt("I'm an experienced investor"),
+  ];
+
+  static const List<_Opt> _experienceOptions = [
+    _Opt('Never', emoji: '🌱'),
+    _Opt('Once or twice', emoji: '🛒'),
+    _Opt('I invest regularly', emoji: '📈'),
+    _Opt('I actively trade', emoji: '⚡'),
+  ];
+
+  static const List<String> _concepts = [
+    'Market capitalization',
+    'P/E ratio',
+    'Candlestick charts',
+    'RSI & moving averages',
+    'Diversification',
+    'Backtesting & overfitting',
+  ];
+
+  // ── Answers ───────────────────────────────────────────────────────────────
+  int _step = 0;
+  int? _knowledge;
+  int? _experience;
+  final Set<int> _known = {};
+  int? _path; // 0 = start from scratch, 1 = start at my level
+  bool _isSaving = false;
+
+  // ── Scoring ───────────────────────────────────────────────────────────────
+
+  int get _points => (_knowledge ?? 0) * 2 + (_experience ?? 0) + _known.length;
+
+  /// 0-based index of the topic the learner would start on.
+  int get _startIndex {
+    final p = _points;
+
+    if (p <= 1) return 0;
+    if (p <= 4) return 2;
+    if (p <= 8) return 5;
+    if (p <= 12) return 8;
+    return 11;
+  }
+
+  String get _levelName {
+    switch (_startIndex) {
+      case 0:
+        return 'newbie';
+      case 2:
+        return 'beginner';
+      case 5:
+        return 'intermediate';
+      case 8:
+        return 'advanced';
+      default:
+        return 'expert';
     }
+  }
 
-    final question = quizProvider.currentQuestion;
-    if (question == null) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              'Unable to load dynamic question.',
-              style: TextStyle(color: textColor, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 12),
-            ElevatedButton(
-              onPressed: () => quizProvider.initQuizSession(),
-              style:
-                  ElevatedButton.styleFrom(backgroundColor: AppColors.emerald),
-              child: const Text('RETRY', style: TextStyle(color: Colors.white)),
-            ),
-          ],
+  bool get _canContinue {
+    switch (_step) {
+      case 0:
+        return _knowledge != null;
+      case 1:
+        return _experience != null;
+      case 2:
+        return true; // picking none is allowed
+      default:
+        return _path != null;
+    }
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  void _goNext() {
+    if (!_canContinue || _isSaving) return;
+
+    if (_step < _lastStep) {
+      setState(() {
+        _step++;
+
+        // A complete beginner only has one sensible choice.
+        if (_step == _lastStep && _startIndex == 0) {
+          _path = 0;
+        }
+      });
+    } else {
+      _finish();
+    }
+  }
+
+  void _goBack() {
+    if (_step == 0 || _isSaving) return;
+    setState(() => _step--);
+  }
+
+  Future<void> _finish() async {
+    final learning = context.read<LearningProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+
+    setState(() => _isSaving = true);
+
+    final useLevel = _path == 1 && _startIndex > 0;
+
+    final ok = await learning.completeOnboarding(
+      startTopicIndex: useLevel ? _startIndex : 0,
+      level: useLevel ? _levelName : 'newbie',
+    );
+
+    // On success main.dart swaps this screen out for the app.
+    if (!mounted) return;
+
+    setState(() => _isSaving = false);
+
+    if (!ok) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            learning.error ?? 'Could not save your starting place. Try again.',
+          ),
         ),
       );
     }
+  }
 
-    final String domainText =
-        (question['domain'] ?? 'TECHNICAL ANALYSIS').toString().toUpperCase();
-    final String promptText = question['prompt'] ?? '';
-    final List choicesList = (question['options'] as List?) ?? [];
+  // ── Build ─────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = context.select<QuizProvider, bool>((q) => q.isDarkMode);
+    final text = isDark ? Colors.white : AppColors.lightTextPrimary;
+    final muted = isDark ? Colors.white54 : AppColors.lightTextMuted;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'STEP 1 OF 2: LEARNING ENGINE',
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 2.0,
-                  color: isDark ? Colors.white38 : AppColors.lightTextMuted,
+          _buildTopBar(isDark),
+          const SizedBox(height: 18),
+          Expanded(
+            child: SingleChildScrollView(
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: KeyedSubtree(
+                  key: ValueKey<int>(_step),
+                  child: _buildStep(isDark, text, muted),
                 ),
               ),
-              Container(
-                width: 80,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white10 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildContinueButton(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTopBar(bool isDark) {
+    return Row(
+      children: [
+        IgnorePointer(
+          ignoring: _step == 0,
+          child: Opacity(
+            opacity: _step == 0 ? 0 : 1,
+            child: IconButton(
+              onPressed: _goBack,
+              icon: Icon(
+                Icons.arrow_back_rounded,
+                color: isDark ? Colors.white54 : AppColors.lightTextMuted,
+              ),
+            ),
+          ),
+        ),
+        Expanded(
+          child: TweenAnimationBuilder<double>(
+            tween: Tween<double>(
+              begin: 0,
+              end: (_step + 1) / (_lastStep + 1),
+            ),
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOut,
+            builder: (_, value, __) => ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: LinearProgressIndicator(
+                value: value,
+                minHeight: 12,
+                backgroundColor:
+                    isDark ? Colors.white10 : const Color(0xFFE5E5E5),
+                valueColor: const AlwaysStoppedAnimation<Color>(
+                  AppColors.emerald,
                 ),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Container(
-                    width: 40,
-                    decoration: BoxDecoration(
-                      color: AppColors.emerald,
-                      borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+      ],
+    );
+  }
+
+  // ── Steps ─────────────────────────────────────────────────────────────────
+
+  String get _prompt {
+    switch (_step) {
+      case 0:
+        return 'How much do you know about stocks?';
+      case 1:
+        return 'Have you ever bought a stock?';
+      case 2:
+        return 'Which of these do you already know?';
+      default:
+        return "Now let's find the best place to start!";
+    }
+  }
+
+  Widget _buildStep(bool isDark, Color text, Color muted) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildMascot(isDark, text),
+        const SizedBox(height: 22),
+        if (_step == 0)
+          ...List.generate(
+            _knowledgeOptions.length,
+            (i) => _optionCard(
+              isDark: isDark,
+              text: text,
+              title: _knowledgeOptions[i].title,
+              selected: _knowledge == i,
+              leading: _SignalBars(filled: i),
+              onTap: () => setState(() => _knowledge = i),
+            ),
+          ),
+        if (_step == 1)
+          ...List.generate(
+            _experienceOptions.length,
+            (i) => _optionCard(
+              isDark: isDark,
+              text: text,
+              title: _experienceOptions[i].title,
+              selected: _experience == i,
+              leading: Text(
+                _experienceOptions[i].emoji ?? '',
+                style: const TextStyle(fontSize: 24),
+              ),
+              onTap: () => setState(() => _experience = i),
+            ),
+          ),
+        if (_step == 2) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12, left: 4),
+            child: Text(
+              'Pick all that apply. It is fine to pick none!',
+              style: TextStyle(fontSize: 12, color: muted),
+            ),
+          ),
+          ...List.generate(
+            _concepts.length,
+            (i) => _optionCard(
+              isDark: isDark,
+              text: text,
+              title: _concepts[i],
+              selected: _known.contains(i),
+              leading: Icon(
+                _known.contains(i)
+                    ? Icons.check_box_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                color: _known.contains(i) ? AppColors.emerald : muted,
+              ),
+              onTap: () => setState(() {
+                if (!_known.remove(i)) _known.add(i);
+              }),
+            ),
+          ),
+        ],
+        if (_step == 3) ..._buildPathOptions(isDark, text),
+      ],
+    );
+  }
+
+  List<Widget> _buildPathOptions(bool isDark, Color text) {
+    final idx = _startIndex;
+
+    return [
+      _optionCard(
+        isDark: isDark,
+        text: text,
+        title: 'Start from scratch',
+        subtitle: 'Begin with Topic 1: ${_topicTitles[0]}',
+        selected: _path == 0,
+        leading: const Text('📖', style: TextStyle(fontSize: 28)),
+        onTap: () => setState(() => _path = 0),
+      ),
+      if (idx > 0)
+        _optionCard(
+          isDark: isDark,
+          text: text,
+          title: 'Start at my level',
+          subtitle: 'Unlock the first ${idx + 1} topics and begin with '
+              'Topic ${idx + 1}: ${_topicTitles[idx]}',
+          selected: _path == 1,
+          leading: const Text('🧭', style: TextStyle(fontSize: 28)),
+          onTap: () => setState(() => _path = 1),
+        ),
+    ];
+  }
+
+  // ── Pieces ────────────────────────────────────────────────────────────────
+
+  Widget _buildMascot(bool isDark, Color text) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Container(
+          width: 66,
+          height: 66,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppColors.emerald.withOpacity(0.15),
+          ),
+          child: const Text('🐂', style: TextStyle(fontSize: 36)),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withOpacity(0.05) : Colors.white,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+                width: 2,
+              ),
+            ),
+            child: Text(
+              _prompt,
+              style: TextStyle(
+                fontSize: 16,
+                height: 1.3,
+                fontWeight: FontWeight.w700,
+                color: text,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _optionCard({
+    required bool isDark,
+    required Color text,
+    required String title,
+    String? subtitle,
+    required bool selected,
+    required Widget leading,
+    required VoidCallback onTap,
+  }) {
+    final borderColor = selected
+        ? AppColors.emerald
+        : (isDark ? Colors.white12 : const Color(0xFFE2E8F0));
+
+    // Must be fully opaque: the flat bottom-edge shadow is drawn underneath
+    // the card and would show through any transparency as a solid block.
+    final Color base = isDark ? AppColors.darkSurface : Colors.white;
+
+    final Color background = selected
+        ? Color.alphaBlend(
+            AppColors.emerald.withOpacity(isDark ? 0.18 : 0.10),
+            base,
+          )
+        : base;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: GestureDetector(
+        onTap: _isSaving ? null : onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: borderColor, width: 2),
+            // Flat "pressed button" edge like Duolingo's option cards.
+            boxShadow: [
+              BoxShadow(
+                color: borderColor,
+                offset: const Offset(0, 3),
+                blurRadius: 0,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 44,
+                child: Center(child: leading),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: selected ? AppColors.emerald : text,
+                      ),
                     ),
-                  ),
+                    if (subtitle != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          color: isDark
+                              ? Colors.white60
+                              : AppColors.lightTextSecondary,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  color: isDark
-                      ? AppColors.darkCard.withOpacity(0.4)
-                      : Colors.white,
-                  borderRadius: BorderRadius.circular(32),
-                  border: Border.all(
-                    color: isDark ? Colors.white10 : AppColors.lightBorder,
-                    width: 2,
-                  ),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? AppColors.emerald.withOpacity(0.2)
-                            : AppColors.lightTextPrimary,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Icon(
-                        AppIcons.target,
-                        color: isDark ? AppColors.emerald : Colors.white,
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      'DOMAIN: $domainText',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1.0,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '"$promptText"',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        fontStyle: FontStyle.italic,
-                        height: 1.5,
-                        color: isDark
-                            ? Colors.white70
-                            : AppColors.lightTextSecondary,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      (question['contextBlurb'] ?? '').toString(),
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        height: 1.4,
-                        color: textColor,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ...choicesList.map((choiceObj) {
-                      final choice = choiceObj as Map<String, dynamic>;
-                      final optId = (choice['id'] ?? '').toString();
-                      final optText = (choice['text'] ?? '').toString();
-                      final isSelected =
-                          quizProvider.selectedQuizOption == optId;
-
-                      Color borderColor =
-                          isDark ? Colors.white10 : AppColors.lightBorder;
-                      Color bgColor = isDark
-                          ? Colors.white.withOpacity(0.05)
-                          : Colors.white;
-                      Color badgeBg = isDark
-                          ? const Color(0xFF18181B)
-                          : const Color(0xFFF8FAFC);
-                      Color badgeText =
-                          isDark ? Colors.white38 : AppColors.lightTextMuted;
-
-                      if (isSelected) {
-                        borderColor = AppColors.emerald;
-                        bgColor = AppColors.emerald.withOpacity(0.15);
-                        badgeBg = AppColors.emerald;
-                        badgeText = Colors.white;
-                      }
-
-                      return GestureDetector(
-                        onTap: () => quizProvider.selectQuizOption(optId),
-                        child: Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: bgColor,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: borderColor, width: 2),
-                          ),
-                          child: Row(
-                            children: [
-                              Container(
-                                width: 32,
-                                height: 32,
-                                decoration: BoxDecoration(
-                                  color: badgeBg,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: isSelected
-                                        ? borderColor
-                                        : (isDark
-                                            ? Colors.white10
-                                            : AppColors.lightBorder),
-                                  ),
-                                ),
-                                child: Center(
-                                  child: Text(
-                                    optId.toUpperCase(),
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w900,
-                                      color: badgeText,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  optText,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: isSelected
-                                        ? AppColors.emerald
-                                        : textColor,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
-          // Show SUBMIT/CONTINUE button whenever an option has been selected
-          if (quizProvider.selectedQuizOption != null)
-            ElevatedButton(
-              onPressed: quizProvider.isLoadingQuiz
-                  ? null
-                  : () => quizProvider
-                      .submitQuizAnswer(quizProvider.selectedQuizOption!),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.emerald,
-                foregroundColor: Colors.white,
-                minimumSize: const Size.fromHeight(56),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                elevation: 10,
-                shadowColor: AppColors.emerald.withOpacity(0.4),
-              ),
-              child: quizProvider.isLoadingQuiz
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(
-                          color: Colors.white, strokeWidth: 2),
-                    )
-                  : const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          'CONTINUE',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 2.0,
-                            fontSize: 12,
-                          ),
-                        ),
-                        SizedBox(width: 8),
-                        Icon(AppIcons.chevronRight, size: 18),
-                      ],
-                    ),
-            ),
-          const SizedBox(height: 12),
-        ],
+        ),
       ),
+    );
+  }
+
+  Widget _buildContinueButton() {
+    final enabled = _canContinue && !_isSaving;
+    final isLast = _step == _lastStep;
+
+    return GestureDetector(
+      onTap: enabled ? _goNext : null,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        width: double.infinity,
+        height: 56,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: enabled ? AppColors.emerald : const Color(0xFFE5E5E5),
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: enabled
+              ? [
+                  BoxShadow(
+                    color: AppColors.emerald.withOpacity(0.55),
+                    offset: const Offset(0, 4),
+                    blurRadius: 0,
+                  ),
+                ]
+              : [],
+        ),
+        child: _isSaving
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Colors.white,
+                ),
+              )
+            : Text(
+                isLast ? 'START LEARNING' : 'CONTINUE',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 1.5,
+                  color: enabled ? Colors.white : const Color(0xFFAFAFAF),
+                ),
+              ),
+      ),
+    );
+  }
+}
+
+/// Three little bars, [filled] of them solid (0-3), like Duolingo's level icons.
+class _SignalBars extends StatelessWidget {
+  final int filled;
+
+  const _SignalBars({required this.filled});
+
+  @override
+  Widget build(BuildContext context) {
+    const heights = [10.0, 17.0, 24.0];
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: List.generate(3, (i) {
+        return Container(
+          width: 7,
+          height: heights[i],
+          margin: const EdgeInsets.only(right: 3),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(3),
+            color: i < filled
+                ? AppColors.emerald
+                : AppColors.emerald.withOpacity(0.25),
+          ),
+        );
+      }),
     );
   }
 }
