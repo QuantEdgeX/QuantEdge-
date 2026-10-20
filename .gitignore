@@ -34,6 +34,8 @@ data/*.csv
 *.pkl
 *.joblib
 toremember.txt
+*.zip
+*.tar.gz
 
 # Jupyter
 .ipynb_checkpoints/

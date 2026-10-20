@@ -4,6 +4,8 @@ import '../providers/quiz_provider.dart';
 import '../models/app_models.dart';
 import '../theme/app_theme.dart';
 import '../widgets/info_modal_sheet.dart';
+import '../screens/ticker_detail_screen.dart';
+import '../screens/profile_settings_screen.dart';
 
 class DashboardTab extends StatelessWidget {
   const DashboardTab({super.key});
@@ -14,7 +16,16 @@ class DashboardTab extends StatelessWidget {
     final isDark = quizProvider.isDarkMode;
     final textColor = isDark ? Colors.white : AppColors.lightTextPrimary;
     final metrics = quizProvider.dashboardMetrics;
-    final assets = quizProvider.marketAssets;
+    final assets = List<MarketAsset>.from(quizProvider.marketAssets);
+    
+    // Prioritize user-selected tickers
+    assets.sort((a, b) {
+      final aSelected = quizProvider.isTickerSelected(a.ticker);
+      final bSelected = quizProvider.isTickerSelected(b.ticker);
+      if (aSelected && !bSelected) return -1;
+      if (!aSelected && bSelected) return 1;
+      return 0;
+    });
 
     return RefreshIndicator(
       onRefresh: () => quizProvider.refreshAllData(),
@@ -48,26 +59,43 @@ class DashboardTab extends StatelessWidget {
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isDark ? Colors.white12 : AppColors.lightBorder,
-                    width: 2,
+              GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ProfileSettingsScreen(),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
                   ),
-                ),
-                child: Text(
-                  'LEVEL: ${quizProvider.userLevel}',
-                  style: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.emerald,
-                    letterSpacing: 1.0,
+                  decoration: BoxDecoration(
+                    color: isDark ? AppColors.darkSurface : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: isDark ? Colors.white12 : AppColors.lightBorder,
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'LEVEL: ${quizProvider.userLevel}',
+                        style: const TextStyle(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.emerald,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.settings_outlined, size: 12, color: AppColors.emerald),
+                    ],
                   ),
                 ),
               ),
@@ -267,178 +295,227 @@ class DashboardTab extends StatelessWidget {
           ...assets.map((item) {
             final Color badgeColor = item.statusColor;
 
-            return Container(
-              margin: const EdgeInsets.only(bottom: 14),
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? AppColors.darkSurface.withOpacity(0.5)
-                    : Colors.white,
-                borderRadius: BorderRadius.circular(28),
-                border: Border.all(
-                  color: isDark ? Colors.white12 : AppColors.lightBorder,
-                  width: 2,
+            return GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => TickerDetailScreen(ticker: item.ticker),
+                  ),
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isDark
+                      ? AppColors.darkSurface.withOpacity(0.5)
+                      : Colors.white,
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(
+                    color: isDark ? Colors.white12 : AppColors.lightBorder,
+                    width: 2,
+                  ),
+                  boxShadow: isDark
+                      ? []
+                      : [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.03),
+                            blurRadius: 16,
+                            offset: const Offset(0, 4),
+                          ),
+                        ],
                 ),
-                boxShadow: isDark
-                    ? []
-                    : [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.03),
-                          blurRadius: 16,
-                          offset: const Offset(0, 4),
+                child: Column(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 44,
+                              height: 44,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.black38
+                                    : AppColors.lightTextPrimary,
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: Text(
+                                item.ticker,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: badgeColor.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                  color: badgeColor.withOpacity(0.4),
+                                  width: 1.5,
+                                ),
+                              ),
+                              child: Text(
+                                item.status,
+                                style: TextStyle(
+                                  color: badgeColor,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          tooltip: 'Quick XAI Summary',
+                          icon: const Icon(AppIcons.info, size: 20),
+                          color: isDark ? Colors.white60 : AppColors.lightTextMuted,
+                          onPressed: () async {
+                            showDialog(
+                              context: context,
+                              barrierDismissible: false,
+                              useRootNavigator: false,
+                              builder: (_) => const Center(
+                                child: CircularProgressIndicator(color: AppColors.emerald),
+                              ),
+                            );
+
+                            final dynamicInsight = await quizProvider.fetchXaiInsightForAsset(item);
+
+                            if (context.mounted) {
+                              Navigator.of(context, rootNavigator: false).pop();
+
+                              showInfoModal(
+                                context,
+                                title: 'Gemini XAI Insight (Level ${quizProvider.userLevel})',
+                                content: dynamicInsight,
+                                isDarkMode: isDark,
+                              );
+                            }
+                          },
                         ),
                       ],
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 12,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.black26 : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
                         children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                              color: isDark
-                                  ? Colors.black38
-                                  : AppColors.lightTextPrimary,
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Text(
-                              item.ticker,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                                fontSize: 13,
-                              ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'CONFIDENCE',
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w900,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : AppColors.lightTextMuted,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  item.confidence,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w900,
+                                    color: textColor,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          const SizedBox(width: 12),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 5,
-                            ),
-                            decoration: BoxDecoration(
-                              color: badgeColor.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: badgeColor.withOpacity(0.4),
-                                width: 1.5,
-                              ),
-                            ),
-                            child: Text(
-                              item.status,
-                              style: TextStyle(
-                                color: badgeColor,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.5,
-                              ),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'SENTIMENT',
+                                  style: TextStyle(
+                                    fontSize: 8,
+                                    fontWeight: FontWeight.w900,
+                                    color: isDark
+                                        ? Colors.white38
+                                        : AppColors.lightTextMuted,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  item.sentiment,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w900,
+                                    color: item.numericSentiment > 0
+                                        ? AppColors.emerald
+                                        : AppColors.rose,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                      IconButton(
-                        icon: const Icon(AppIcons.info, size: 20),
-                        color: isDark ? Colors.white60 : AppColors.lightTextMuted,
-                        onPressed: () async {
-                          showDialog(
-                            context: context,
-                            barrierDismissible: false,
-                            builder: (context) => const Center(
-                              child: CircularProgressIndicator(color: AppColors.emerald),
-                            ),
-                          );
-
-                          final dynamicInsight = await quizProvider.fetchXaiInsightForAsset(item);
-
-                          if (context.mounted) {
-                            Navigator.pop(context);
-
-                            showInfoModal(
-                              context,
-                              title: 'Gemini XAI Insight (Level ${quizProvider.userLevel})',
-                              content: dynamicInsight,
-                              isDarkMode: isDark,
-                            );
-                          }
-                        },
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
                     ),
-                    decoration: BoxDecoration(
-                      color: isDark ? Colors.black26 : const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
+                    const SizedBox(height: 14),
+                    // Interactive footer cue
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'CONFIDENCE',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  color: isDark
-                                      ? Colors.white38
-                                      : AppColors.lightTextMuted,
-                                ),
+                        Row(
+                          children: [
+                            const Icon(Icons.insights_rounded, size: 13, color: AppColors.emerald),
+                            const SizedBox(width: 6),
+                            Text(
+                              'FACTOR VECTORS & PREDICTION',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.0,
+                                color: isDark ? Colors.white54 : AppColors.lightTextSecondary,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                item.confidence,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w900,
-                                  color: textColor,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                          ],
                         ),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'SENTIMENT',
-                                style: TextStyle(
-                                  fontSize: 8,
-                                  fontWeight: FontWeight.w900,
-                                  color: isDark
-                                      ? Colors.white38
-                                      : AppColors.lightTextMuted,
-                                ),
+                        Row(
+                          children: [
+                            const Text(
+                              'VIEW DETAIL',
+                              style: TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.0,
+                                color: AppColors.emerald,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                item.sentiment,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w900,
-                                  color: item.numericSentiment > 0
-                                      ? AppColors.emerald
-                                      : AppColors.rose,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.arrow_forward_ios_rounded, size: 9, color: AppColors.emerald),
+                          ],
                         ),
                       ],
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           }),

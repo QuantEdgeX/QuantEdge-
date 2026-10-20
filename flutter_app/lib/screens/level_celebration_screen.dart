@@ -108,7 +108,7 @@ class LevelCelebrationScreen extends StatelessWidget {
           ),
           const SizedBox(height: 36),
           ElevatedButton(
-            onPressed: () => quizProvider.setPhase(AppPhase.mainApp),
+            onPressed: () => quizProvider.setPhase(AppPhase.tour),
             style: ElevatedButton.styleFrom(
               backgroundColor: isDark
                   ? Colors.white

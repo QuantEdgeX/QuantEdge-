@@ -1,24 +1,65 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import '../models/app_models.dart';
 import '../services/api_service.dart';
 import '../services/learning_engine_service.dart';
+import '../theme/app_theme.dart';
 
-enum AppPhase { onboarding1, onboarding2, assessmentComplete, mainApp }
+enum AppPhase {
+  splash,
+  login,
+  enrichment,
+  onboarding1,
+  onboarding2,
+  assessmentComplete,
+  tour,
+  tickerSelection,
+  mainApp,
+}
 
 enum AppTab {
   dashboard,
   quiz,
   portfolio,
   assistant
-} // Updated: replaced market with quiz
+}
 
 class QuizProvider extends ChangeNotifier {
   final ApiService _apiService = ApiService();
 
+  // Try syncing profile to Firebase
+  Future<void> _syncToFirebase() async {
+    try {
+      if (Firebase.apps.isEmpty) return; // Not initialized
+      final firestore = FirebaseFirestore.instance;
+      
+      // Use email as doc ID if available, else fallback
+      final docId = _userProfile.email.isNotEmpty 
+          ? _userProfile.email 
+          : 'guest_user';
+          
+      await firestore.collection('users').doc(docId).set({
+        'name': _userProfile.name,
+        'email': _userProfile.email,
+        'experienceLevel': _userProfile.experienceLevel,
+        'riskStyle': _userProfile.riskStyle,
+        'sectorInterests': _userProfile.sectorInterests,
+        'investingGoal': _userProfile.investingGoal,
+        'chosenTickers': _userProfile.chosenTickers,
+        'level': _userLevel,
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Firebase sync failed: $e');
+    }
+  }
+
   // App & Navigation State
-  AppPhase _phase = AppPhase.onboarding1;
+  AppPhase _phase = AppPhase.splash;
   AppTab _currentTab = AppTab.dashboard;
   bool _isDarkMode = false;
   int _userLevel = 2;
@@ -48,6 +89,31 @@ class QuizProvider extends ChangeNotifier {
   List<PortfolioHolding> _portfolioHoldings = [];
   bool _isLoadingDashboard = false;
   bool _isLoadingPortfolio = false;
+
+  // User Profile & New-flow State
+  UserProfile _userProfile = const UserProfile();
+  bool _enrichmentSkipped = false;
+  List<String> _selectedTickers = [];
+  List<TickerSearchResult> _tickerSearchResults = [];
+  bool _isSearchingTickers = false;
+  Timer? _searchDebounce;
+  final Map<String, TickerDetail> _tickerDetailCache = {};
+  bool _isLoadingTickerDetail = false;
+
+  static const List<Map<String, String>> _popularTickers = [
+    {'ticker': 'NVDA', 'name': 'NVIDIA Corporation'},
+    {'ticker': 'AAPL', 'name': 'Apple Inc.'},
+    {'ticker': 'TSLA', 'name': 'Tesla Inc.'},
+    {'ticker': 'MSFT', 'name': 'Microsoft Corporation'},
+    {'ticker': 'AMZN', 'name': 'Amazon.com Inc.'},
+    {'ticker': 'GOOGL', 'name': 'Alphabet Inc.'},
+    {'ticker': 'META', 'name': 'Meta Platforms'},
+    {'ticker': 'AMD', 'name': 'Advanced Micro Devices'},
+    {'ticker': 'JPM', 'name': 'JPMorgan Chase'},
+    {'ticker': 'NFLX', 'name': 'Netflix Inc.'},
+    {'ticker': 'DIS', 'name': 'Walt Disney Co.'},
+    {'ticker': 'BABA', 'name': 'Alibaba Group'},
+  ];
 
   QuizProvider() {
     _initInitialData();
@@ -100,6 +166,16 @@ class QuizProvider extends ChangeNotifier {
   List<PortfolioHolding> get portfolioHoldings => _portfolioHoldings;
   bool get isLoadingDashboard => _isLoadingDashboard;
   bool get isLoadingPortfolio => _isLoadingPortfolio;
+
+  // New-flow Getters
+  UserProfile get userProfile => _userProfile;
+  bool get enrichmentSkipped => _enrichmentSkipped;
+  List<String> get selectedTickers => _selectedTickers;
+  List<TickerSearchResult> get tickerSearchResults => _tickerSearchResults;
+  bool get isSearchingTickers => _isSearchingTickers;
+  bool get isLoadingTickerDetail => _isLoadingTickerDetail;
+  Map<String, TickerDetail> get tickerDetailCache => _tickerDetailCache;
+  List<Map<String, String>> get popularTickers => _popularTickers;
 
   // Navigation & UI Actions
   void toggleTheme() {
@@ -260,12 +336,15 @@ class QuizProvider extends ChangeNotifier {
       ),
     );
 
-    await Future.wait([
-      initQuizSession(),
-      refreshMarketData(),
-      refreshDashboardMetrics(),
-      refreshPortfolioData(),
-    ]);
+    // Show splash for 1.5s then immediately show login — data loads in background
+    await Future.delayed(const Duration(milliseconds: 1500));
+    setPhase(AppPhase.login);
+
+    // Fire-and-forget: UI shows loading states; no need to block on these
+    unawaited(initQuizSession());
+    unawaited(refreshMarketData());
+    unawaited(refreshDashboardMetrics());
+    unawaited(refreshPortfolioData());
   }
 
   Future<void> refreshDashboardMetrics() async {
@@ -415,4 +494,250 @@ class QuizProvider extends ChangeNotifier {
     }
     return '${asset.ticker} shows a confidence level of ${asset.confidence} driven by technical and sentiment factor alignment.';
   }
+
+  // ─── Auth ────────────────────────────────────────────────────────────────
+
+  void completeLogin({required String name, required String email}) {
+    _userProfile = _userProfile.copyWith(name: name, email: email);
+    _syncToFirebase();
+    setPhase(AppPhase.enrichment);
+  }
+
+  void updateUserProfile(UserProfile updated) {
+    _userProfile = updated;
+    _syncToFirebase();
+    notifyListeners();
+  }
+
+  void setUserLevel(int level) {
+    _userLevel = level;
+    notifyListeners();
+  }
+
+  void logout() {
+    _phase = AppPhase.login;
+    notifyListeners();
+  }
+
+  // ─── Enrichment ──────────────────────────────────────────────────────────
+
+  void saveEnrichmentAnswers({
+    required String experienceLevel,
+    required String riskStyle,
+    required List<String> sectorInterests,
+    required String investingGoal,
+  }) {
+    _userProfile = UserProfile(
+      name: _userProfile.name,
+      email: _userProfile.email,
+      experienceLevel: experienceLevel,
+      riskStyle: riskStyle,
+      sectorInterests: sectorInterests,
+      investingGoal: investingGoal,
+      chosenTickers: _userProfile.chosenTickers,
+    );
+    _syncToFirebase();
+    _enrichmentSkipped = false;
+    setPhase(AppPhase.onboarding1);
+  }
+
+  void skipEnrichment() {
+    _enrichmentSkipped = true;
+    setPhase(AppPhase.onboarding1);
+  }
+
+  // ─── Ticker Selection ────────────────────────────────────────────────────
+
+  void toggleTickerSelection(String ticker) {
+    if (_selectedTickers.contains(ticker)) {
+      _selectedTickers = _selectedTickers.where((t) => t != ticker).toList();
+    } else if (_selectedTickers.length < 3) {
+      _selectedTickers = [..._selectedTickers, ticker];
+    }
+    notifyListeners();
+  }
+
+  bool isTickerSelected(String ticker) => _selectedTickers.contains(ticker);
+
+  Future<void> confirmTickerSelection() async {
+    if (_selectedTickers.isEmpty) return;
+    _userProfile = _userProfile.copyWith(chosenTickers: _selectedTickers);
+    _syncToFirebase();
+    setPhase(AppPhase.mainApp);
+  }
+
+  void searchTickers(String query) {
+    final q = query.trim().toUpperCase();
+    _searchDebounce?.cancel();
+    if (q.isEmpty) {
+      _tickerSearchResults = [];
+      notifyListeners();
+      return;
+    }
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+      _doTickerSearch(q);
+    });
+  }
+
+  Future<void> _doTickerSearch(String query) async {
+    _isSearchingTickers = true;
+    notifyListeners();
+    try {
+      final uri = Uri.parse(
+        'http://127.0.0.1:8000/api/tickers/search?q=' + Uri.encodeComponent(query),
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        _tickerSearchResults = data
+            .map((e) => TickerSearchResult.fromJson(e as Map<String, dynamic>))
+            .toList();
+      }
+    } catch (_) {
+      _tickerSearchResults = _popularTickers
+          .where((t) =>
+              t['ticker']!.startsWith(query) ||
+              t['name']!.toUpperCase().contains(query))
+          .map((t) => TickerSearchResult(
+                ticker: t['ticker']!,
+                name: t['name']!,
+                price: 0.0,
+                changePercent: 0.0,
+                exchange: 'NASDAQ',
+              ))
+          .toList();
+    } finally {
+      _isSearchingTickers = false;
+      notifyListeners();
+    }
+  }
+
+  // ─── Tour ────────────────────────────────────────────────────────────────
+
+  void completeTour() => setPhase(AppPhase.tickerSelection);
+
+  // ─── Ticker Detail ───────────────────────────────────────────────────────
+
+  Future<TickerDetail?> fetchTickerDetail(String ticker) async {
+    if (_tickerDetailCache.containsKey(ticker)) return _tickerDetailCache[ticker];
+    _isLoadingTickerDetail = true;
+    notifyListeners();
+    try {
+      final uri = Uri.parse(
+        'http://127.0.0.1:8000/api/tickers/' +
+            ticker +
+            '/detail?xaiLevel=' +
+            _userLevel.toString(),
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 6));
+      if (response.statusCode == 200) {
+        final detail = TickerDetail.fromJson(
+            jsonDecode(response.body) as Map<String, dynamic>);
+        _tickerDetailCache[ticker] = detail;
+        _isLoadingTickerDetail = false;
+        notifyListeners();
+        return detail;
+      }
+    } catch (e) {
+      debugPrint('fetchTickerDetail error: ' + e.toString());
+    }
+    final mock = _mockTickerDetail(ticker);
+    _tickerDetailCache[ticker] = mock;
+    _isLoadingTickerDetail = false;
+    notifyListeners();
+    return mock;
+  }
+
+  TickerDetail _mockTickerDetail(String ticker) {
+    const prices = [
+      420.0, 435.0, 428.0, 445.0, 460.0, 455.0, 471.0,
+      468.0, 480.0, 487.0, 492.0, 488.0, 495.0, 501.0, 498.0,
+    ];
+    const signal = 'BUY';
+    const conf = 0.91;
+    return TickerDetail(
+      ticker: ticker,
+      companyName: _companyName(ticker),
+      currentPrice: 487.20,
+      changePercent: 2.34,
+      high52w: 502.0,
+      low52w: 180.0,
+      volume: 42300000,
+      marketCap: 1200000000000,
+      priceHistory: prices,
+      priceLabels: const [
+        '1d', '2d', '3d', '4d', '5d', '6d', '7d',
+        '8d', '9d', '10d', '11d', '12d', '13d', '14d', '15d',
+      ],
+      aiSignal: signal,
+      aiConfidence: conf,
+      sentimentScore: 0.88,
+      rsi: 68.4,
+      boldPrediction: _mockPrediction(ticker, signal, conf),
+      factors: _mockFactors(),
+      xaiInsight:
+          'Strong institutional momentum detected. RSI at 68.4 shows room before '
+          'overbought. FinBERT sentiment at +0.88 across recent news cycle supports '
+          'continued upside.',
+    );
+  }
+
+  String _mockPrediction(String ticker, String signal, double conf) {
+    final pct = (conf * 100).toStringAsFixed(0);
+    if (signal == 'BUY') {
+      return 'Model signals $ticker is positioned for a short-term breakout with '
+          '$pct% confidence. Upside target: +8-12% over 5 sessions.';
+    }
+    if (signal == 'SELL') {
+      return 'Elevated risk detected in $ticker. Model recommends reducing exposure '
+          '- $pct% confidence of pullback within 3-5 sessions.';
+    }
+    return '$ticker is consolidating near key support. Model holds neutral with '
+        '$pct% confidence. Wait for volume confirmation before action.';
+  }
+
+  String _companyName(String ticker) {
+    const names = <String, String>{
+      'NVDA': 'NVIDIA Corporation',
+      'AAPL': 'Apple Inc.',
+      'TSLA': 'Tesla Inc.',
+      'MSFT': 'Microsoft Corp.',
+      'AMZN': 'Amazon.com Inc.',
+      'GOOGL': 'Alphabet Inc.',
+      'META': 'Meta Platforms',
+      'AMD': 'Advanced Micro Devices',
+    };
+    return names[ticker] ?? ticker;
+  }
+
+  List<FactorImpact> _mockFactors() => [
+        FactorImpact(
+          name: 'Volume Analysis',
+          weight: '39%',
+          percentage: 0.39,
+          code: 'VL',
+          color: AppColors.emerald,
+        ),
+        FactorImpact(
+          name: 'Price Action',
+          weight: '25%',
+          percentage: 0.25,
+          code: 'PR',
+          color: AppColors.blue,
+        ),
+        FactorImpact(
+          name: 'Social Sentiment',
+          weight: '21%',
+          percentage: 0.21,
+          code: 'SN',
+          color: AppColors.amber,
+        ),
+        FactorImpact(
+          name: 'Retail Sentiment',
+          weight: '15%',
+          percentage: 0.15,
+          code: 'RT',
+          color: AppColors.rose,
+        ),
+      ];
 }
