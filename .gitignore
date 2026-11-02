@@ -31,6 +31,7 @@ windows/flutter/ephemeral/
 
 # Data files & Models
 data/*.csv
+backend/data/
 *.pkl
 *.joblib
 toremember.txt

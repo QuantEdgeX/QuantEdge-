@@ -482,6 +482,18 @@ class DashboardTab extends StatelessWidget {
                               context,
                               ticker: item.ticker,
                               isDarkMode: isDark,
+                              signalType: item.status,
+                              liveFactors: {
+                                'rsi': item.rsi,
+                                'sentiment': item.numericSentiment,
+                                'finbertSentiment': item.numericSentiment,
+                                'confidence': item.confidence,
+                                'orderBookIntensity':
+                                    'Institutional depth ${item.confidence}',
+                                'volatility': '0.015 (Standard)',
+                                'price': item.price,
+                                'changePercent': item.changePercent,
+                              },
                             );
                           },
                         ),
@@ -504,7 +516,7 @@ class DashboardTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'CONFIDENCE',
+                                  'AI CONFIDENCE',
                                   style: TextStyle(
                                     fontSize: 8,
                                     fontWeight: FontWeight.w900,
@@ -530,7 +542,7 @@ class DashboardTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'SENTIMENT',
+                                  'NEWS & SOCIAL SENTIMENT',
                                   style: TextStyle(
                                     fontSize: 8,
                                     fontWeight: FontWeight.w900,
@@ -565,7 +577,7 @@ class DashboardTab extends StatelessWidget {
                                 size: 13, color: AppColors.emerald),
                             const SizedBox(width: 6),
                             Text(
-                              'FACTOR VECTORS & PREDICTION',
+                              'KEY PRICE DRIVERS & INSIGHT',
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w900,

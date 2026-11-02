@@ -250,6 +250,29 @@ class PortfolioTab extends StatelessWidget {
                                         context,
                                         ticker: holding.symbol,
                                         isDarkMode: isDark,
+                                        signalType: holding.dayChange >= 0
+                                            ? 'BUY'
+                                            : 'HOLD',
+                                        liveFactors: {
+                                          'currentPrice': holding.currentPrice,
+                                          'dayChangePercent':
+                                              holding.dayChangePercent,
+                                          'totalValue': holding.totalValue,
+                                          'allocation': holding.allocation,
+                                          'orderBookIntensity':
+                                              'Portfolio weight ${holding.allocation}',
+                                          'volatility':
+                                              holding.dayChangePercent.abs() > 3
+                                                  ? 'High'
+                                                  : 'Normal',
+                                          'finbertSentiment':
+                                              holding.dayChange >= 0
+                                                  ? 0.72
+                                                  : -0.28,
+                                          'rsi': holding.dayChange >= 0
+                                              ? 59.2
+                                              : 43.8,
+                                        },
                                       );
                                     },
                                     borderRadius: BorderRadius.circular(10),
@@ -391,7 +414,7 @@ class PortfolioTab extends StatelessWidget {
                                   size: 13, color: AppColors.emerald),
                               const SizedBox(width: 6),
                               Text(
-                                'VIEW ANOMALY & XAI DETAIL',
+                                'VIEW DETAIL & AI INSIGHT',
                                 style: TextStyle(
                                   fontSize: 9,
                                   fontWeight: FontWeight.w900,

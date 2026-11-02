@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/app_models.dart';
 import '../providers/quiz_provider.dart';
 import '../theme/app_theme.dart';
+import '../widgets/xai_explanation_sheet.dart';
 
 class TickerDetailScreen extends StatefulWidget {
   final String ticker;
@@ -48,12 +49,22 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
     }
   }
 
-  void _showXai(BuildContext ctx, TickerDetail detail, bool isDark) {
-    showDialog(
-      context: ctx,
-      barrierColor: Colors.black54,
-      useRootNavigator: false,
-      builder: (_) => _XaiDialog(detail: detail, isDark: isDark),
+  void _openAiInsight(BuildContext ctx, TickerDetail d, bool isDark) {
+    showXaiExplanationSheet(
+      ctx,
+      ticker: widget.ticker,
+      isDarkMode: isDark,
+      signalType: d.aiSignal,
+      liveFactors: {
+        'rsi': d.rsi,
+        'sentiment': d.sentimentScore,
+        'finbertSentiment': d.sentimentScore,
+        'confidence': '${(d.aiConfidence * 100).toInt()}%',
+        'orderBookIntensity': 'Strong buyer support',
+        'volatility': 'Normal range',
+        'price': d.currentPrice,
+        'changePercent': d.changePercent,
+      },
     );
   }
 
@@ -80,34 +91,6 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
             fontStyle: FontStyle.italic, color: textColor,
           ),
         ),
-        actions: [
-          if (_detail != null)
-            Builder(builder: (ctx) => GestureDetector(
-              onTap: () => _showXai(ctx, _detail!, isDark),
-              child: Container(
-                margin: const EdgeInsets.only(right: 16),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: AppColors.emerald.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppColors.emerald.withOpacity(0.4)),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.info_outline_rounded,
-                      size: 14, color: AppColors.emerald),
-                    SizedBox(width: 4),
-                    Text('XAI',
-                      style: TextStyle(
-                        fontSize: 10, fontWeight: FontWeight.w900,
-                        color: AppColors.emerald, letterSpacing: 0.8,
-                      )),
-                  ],
-                ),
-              ),
-            )),
-        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator(
@@ -124,6 +107,7 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
 
   Widget _buildBody(TickerDetail d, bool isDark, Color textColor,
       Color surfaceColor, Color cardColor, Color borderColor) {
+    final userLevel = context.watch<QuizProvider>().userLevel;
     final isUp = d.isPositive;
     final changeColor = isUp ? AppColors.emerald : AppColors.rose;
 
@@ -352,26 +336,46 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
                       fontSize: 12, fontWeight: FontWeight.w900,
                       color: AppColors.emerald,
                     )),
-                  Builder(builder: (ctx) => GestureDetector(
-                    onTap: () => _showXai(ctx, _detail!, isDark),
+                  GestureDetector(
+                    onTap: () => _openAiInsight(context, d, isDark),
                     child: const Icon(Icons.info_outline_rounded,
                       size: 16, color: AppColors.emerald),
-                  )),
+                  ),
                 ],
               ),
               const SizedBox(height: 12),
-              _SignalRow('FinBERT sentiment', _sentimentLabel(d.sentimentScore),
-                d.sentimentScore >= 0 ? AppColors.emerald : AppColors.rose, isDark, textColor),
+              _SignalRow(
+                'News & Social Sentiment',
+                userLevel <= 2
+                    ? (d.sentimentScore > 0.2
+                        ? 'Positive (Bullish)'
+                        : d.sentimentScore < -0.2
+                            ? 'Cautious (Bearish)'
+                            : 'Neutral')
+                    : _sentimentLabel(d.sentimentScore),
+                d.sentimentScore >= 0 ? AppColors.emerald : AppColors.rose,
+                isDark,
+                textColor,
+              ),
               const SizedBox(height: 8),
-              _SignalRow('RSI indicator',
-                '${d.rsi.toStringAsFixed(1)} (${d.rsi > 70 ? 'Overbought' : d.rsi < 30 ? 'Oversold' : 'Neutral'})',
+              _SignalRow(
+                'Price Momentum',
+                userLevel <= 2
+                    ? (d.rsi > 70
+                        ? 'High Momentum (Overbought)'
+                        : d.rsi < 30
+                            ? 'Low / Rebound Zone (Oversold)'
+                            : 'Steady Momentum')
+                    : '${d.rsi.toStringAsFixed(1)} (${d.rsi > 70 ? 'Overbought' : d.rsi < 30 ? 'Oversold' : 'Neutral'})',
                 d.rsi > 70 ? AppColors.rose : d.rsi < 30 ? AppColors.emerald : AppColors.amber,
-                isDark, textColor),
+                isDark,
+                textColor,
+              ),
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Random Forest signal',
+                  Text('AI Overall Signal',
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
                       color: isDark ? Colors.white70 : AppColors.lightTextSecondary)),
                   _SignalBadge(signal: d.aiSignal, color: d.signalColor),
@@ -379,7 +383,7 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
               ),
               const SizedBox(height: 10),
               GestureDetector(
-                onTap: () {},
+                onTap: () => _openAiInsight(context, d, isDark),
                 child: Text('Want to learn more? Click here →',
                   style: TextStyle(
                     fontSize: 10, fontWeight: FontWeight.w700,
@@ -553,12 +557,12 @@ class _FactorImpactCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Influence Vectors',
+          Text('KEY PRICE DRIVERS',
             style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900,
               letterSpacing: 2.0,
               color: isDark ? Colors.white38 : AppColors.lightTextMuted)),
           const SizedBox(height: 4),
-          const Text('Factor Impact Distribution',
+          const Text('Key Price Drivers',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900,
               fontStyle: FontStyle.italic, color: AppColors.emerald)),
           const SizedBox(height: 12),
@@ -610,201 +614,12 @@ class _FactorImpactCard extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'Factor impacts are normalised across all active clusters. Level ${context.read<QuizProvider>().userLevel}',
+              'Insight Depth: Level ${context.read<QuizProvider>().userLevel} (${context.read<QuizProvider>().userLevel <= 2 ? "Simple" : "Advanced"})',
               style: TextStyle(fontSize: 9,
                 color: isDark ? Colors.white24 : AppColors.lightTextMuted),
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── XAI Dialog (constrained inside the phone frame navigator) ─────────────────
-
-class _XaiDialog extends StatefulWidget {
-  final TickerDetail detail;
-  final bool isDark;
-
-  const _XaiDialog({required this.detail, required this.isDark});
-
-  @override
-  State<_XaiDialog> createState() => _XaiDialogState();
-}
-
-class _XaiDialogState extends State<_XaiDialog>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final Animation<double> _scaleAnim;
-  late final Animation<double> _fadeAnim;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-        duration: const Duration(milliseconds: 250), vsync: this)..forward();
-    _scaleAnim = Tween<double>(begin: 0.85, end: 1.0)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-    _fadeAnim = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOut));
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _dismiss() {
-    _ctrl.reverse().then((_) {
-      if (mounted) Navigator.of(context).pop();
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: _dismiss,
-      child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: AnimatedBuilder(
-          animation: _ctrl,
-          builder: (_, child) => Opacity(
-            opacity: _fadeAnim.value,
-            child: Transform.scale(
-              scale: _scaleAnim.value,
-              alignment: Alignment.topRight,
-              child: child,
-            ),
-          ),
-          child: Align(
-            alignment: Alignment.topCenter,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 80, 16, 16),
-              child: GestureDetector(
-                onTap: () {}, // prevent tap-through
-                child: Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(
-                    color: widget.isDark ? AppColors.darkCard : Colors.white,
-                    borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                        color: AppColors.emerald.withOpacity(0.4), width: 1.5),
-                    boxShadow: [
-                      BoxShadow(
-                        color: AppColors.emerald.withOpacity(0.12),
-                        blurRadius: 24,
-                        spreadRadius: 4,
-                      ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Header
-                      Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: AppColors.emerald.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.hub_outlined,
-                                    size: 12, color: AppColors.emerald),
-                                const SizedBox(width: 4),
-                                Text(
-                                    'XAI INSIGHT — ${widget.detail.ticker}',
-                                    style: const TextStyle(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w900,
-                                      letterSpacing: 1.2,
-                                      color: AppColors.emerald,
-                                    )),
-                              ],
-                            ),
-                          ),
-                          const Spacer(),
-                          GestureDetector(
-                            onTap: _dismiss,
-                            child: Icon(Icons.close_rounded,
-                                size: 16,
-                                color: widget.isDark
-                                    ? Colors.white38
-                                    : AppColors.lightTextMuted),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      // Insight text
-                      Text(
-                        widget.detail.xaiInsight,
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.6,
-                          fontWeight: FontWeight.w600,
-                          color: widget.isDark
-                              ? Colors.white70
-                              : AppColors.lightTextSecondary,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      // Mini factor preview
-                      ...widget.detail.factors.take(3).map((f) => Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 24,
-                                  height: 24,
-                                  decoration: BoxDecoration(
-                                    color: f.color.withOpacity(0.12),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Center(
-                                    child: Text(f.code,
-                                        style: TextStyle(
-                                            fontSize: 8,
-                                            fontWeight: FontWeight.w900,
-                                            color: f.color)),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(3),
-                                    child: LinearProgressIndicator(
-                                      value: f.percentage,
-                                      minHeight: 4,
-                                      backgroundColor:
-                                          f.color.withOpacity(0.1),
-                                      valueColor:
-                                          AlwaysStoppedAnimation<Color>(f.color),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(f.weight,
-                                    style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w900,
-                                        color: f.color)),
-                              ],
-                            ),
-                          )),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

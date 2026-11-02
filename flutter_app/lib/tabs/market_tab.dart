@@ -66,7 +66,7 @@ class FactorProgressBar extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          'SHAP Vector',
+                          'Price Driver',
                           style: TextStyle(
                             fontSize: 9,
                             fontWeight: FontWeight.w600,
@@ -140,9 +140,9 @@ class MarketTab extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 110),
         children: [
-          // ── Section 1: Influence Vectors ──────────────────────────────────
+          // ── Section 1: Key Price Drivers ──────────────────────────────────
           Text(
-            'INFLUENCE VECTORS',
+            'KEY PRICE DRIVERS',
             style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w900,
@@ -151,7 +151,7 @@ class MarketTab extends StatelessWidget {
             ),
           ),
           Text(
-            'Factor Impact Distribution',
+            'Price Driver Impact Distribution',
             style: TextStyle(
               fontSize: 20,
               fontWeight: FontWeight.w900,
@@ -210,7 +210,7 @@ class MarketTab extends StatelessWidget {
                         size: 13, color: AppColors.emerald),
                     const SizedBox(width: 6),
                     Text(
-                      'Tap any factor bar to inspect XAI attribution mechanics',
+                      'Tap any price driver to inspect how it influences AI signals',
                       style: TextStyle(
                         fontSize: 9,
                         fontWeight: FontWeight.w700,
@@ -357,6 +357,18 @@ class MarketTab extends StatelessWidget {
                               context,
                               ticker: item.ticker,
                               isDarkMode: isDark,
+                              signalType: item.status,
+                              liveFactors: {
+                                'rsi': item.rsi,
+                                'sentiment': item.numericSentiment,
+                                'finbertSentiment': item.numericSentiment,
+                                'confidence': item.confidence,
+                                'orderBookIntensity':
+                                    'Multi-factor depth ${item.confidence}',
+                                'volatility': 'Calibrated market variance',
+                                'price': item.price,
+                                'changePercent': item.changePercent,
+                              },
                             );
                           },
                         ),
@@ -379,7 +391,7 @@ class MarketTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'CONFIDENCE',
+                                  'AI CONFIDENCE',
                                   style: TextStyle(
                                     fontSize: 8,
                                     fontWeight: FontWeight.w900,
@@ -405,7 +417,7 @@ class MarketTab extends StatelessWidget {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'SENTIMENT',
+                                  'NEWS & SOCIAL SENTIMENT',
                                   style: TextStyle(
                                     fontSize: 8,
                                     fontWeight: FontWeight.w900,
@@ -439,7 +451,7 @@ class MarketTab extends StatelessWidget {
                                 size: 13, color: AppColors.emerald),
                             const SizedBox(width: 6),
                             Text(
-                              'FACTOR VECTORS & PREDICTION',
+                              'KEY PRICE DRIVERS & INSIGHT',
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w900,

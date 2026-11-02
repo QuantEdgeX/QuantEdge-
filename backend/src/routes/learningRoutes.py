@@ -1270,6 +1270,13 @@ class XaiExplainRequest(BaseModel):
     xaiLevel: int = Field(ge=1, le=10)
     sessionId: Optional[str] = None
 
+class QwenXaiRequest(BaseModel):
+    ticker: str
+    signalType: str = "BUY"
+    factors: Dict[str, Any] = Field(default_factory=dict)
+    userLevel: int = Field(default=2, ge=1, le=10)
+
+
 
 class AssistantQuery(BaseModel):
     query: str
@@ -1804,6 +1811,161 @@ async def xai_explain(req: XaiExplainRequest) -> Dict[str, Any]:
             if used_gemini
             else "deterministic_fallback"
         ),
+        "generatedAt": _now_iso(),
+    }
+
+
+
+
+
+
+@app.post("/api/learning/xai/qwen")
+async def xai_qwen(req: QwenXaiRequest) -> Dict[str, Any]:
+    ticker = req.ticker.upper()
+    sig = req.signalType.upper()
+    factors = req.factors or {}
+    user_level = req.userLevel
+    is_simple = user_level <= 2
+
+    raw_rsi = factors.get("rsi", 52.0)
+    try:
+        rsi = float(raw_rsi)
+    except Exception:
+        rsi = 52.0
+
+    raw_sentiment = factors.get("finbertSentiment", factors.get("sentiment", 0.0))
+    try:
+        sentiment = float(raw_sentiment)
+    except Exception:
+        sentiment = 0.0
+
+    order_book = str(factors.get("orderBookIntensity") or factors.get("volumeAnalysis") or "Steady institutional bid concentration")
+    volatility = str(factors.get("volatility") or "standard market variance")
+
+    if is_simple:
+        prompt = f"""You are a consumer-friendly financial AI assistant called 'QuantEdge AI Insight'.
+Write strictly in plain, conversational English for everyday investors.
+Do NOT output any raw math numbers, percentages, decimal figures, variances, or technical values like '+0.45', '0.015 variance', or 'RSI 68.4'.
+Instead, translate the quantitative factors into clear narrative statements (e.g., 'Positive news coverage', 'Strong buying demand', 'Healthy upward price momentum').
+
+Ticker: {ticker}
+AI Overall Signal: {sig}
+Factors context:
+- Price Momentum (RSI): {rsi}
+- Buyer/Seller Demand: {order_book}
+- News & Social Sentiment: {sentiment}
+- Volatility: {volatility}
+
+Format Requirement:
+Provide exactly a 2-sentence conversational user summary followed by 3 concise bullet points explaining why this signal was generated.
+Use these exact bullet headers:
+• **News & Social Sentiment:** (Explain news and community sentiment in everyday words with NO raw numbers)
+• **Buyer/Seller Demand:** (Explain buyer vs seller interest in everyday words with NO raw numbers)
+• **Price Momentum:** (Explain price movement in everyday words with NO raw numbers)"""
+    else:
+        prompt = f"""You are a financial quantitative AI copilot called 'QuantEdge AI Insight'. Synthesize the quantitative factors below into a natural language narrative explanation for advanced traders.
+Include technical parameters, exact indicator levels, and decimal scores where appropriate.
+
+Ticker: {ticker}
+AI Overall Signal: {sig}
+Factors:
+- Price Momentum (RSI): {rsi}
+- Buyer/Seller Demand: {order_book}
+- News & Social Sentiment: {sentiment}
+- Volatility: {volatility}
+
+Format Requirement:
+Provide exactly a 2-sentence summary followed by 3 concise bullet points with technical metrics explaining why this signal was generated.
+Use these bullet headers:
+• **News & Social Sentiment:** [metric details]
+• **Buyer/Seller Demand:** [order book details]
+• **Price Momentum:** [RSI & volatility metrics]"""
+
+    explanation = None
+    if _groq_client:
+        try:
+            completion = await asyncio.to_thread(
+                _groq_client.chat.completions.create,
+                model=_GROQ_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=350,
+            )
+            explanation = completion.choices[0].message.content.strip()
+        except Exception as exc:
+            logger.warning("Groq Qwen XAI inference failed (%s), falling back to template", exc)
+
+    if not explanation and _gemini_client:
+        try:
+            response = await asyncio.to_thread(
+                _gemini_client.models.generate_content,
+                model="gemini-3.8-flash",
+                contents=prompt,
+            )
+            explanation = response.text.strip()
+        except Exception as exc:
+            logger.warning("Gemini Qwen XAI inference failed (%s)", exc)
+
+    if not explanation:
+        if is_simple:
+            if sig == "BUY":
+                explanation = (
+                    f"QuantEdge AI Insight sees strong buyer interest pushing {ticker} upward, backed by encouraging news and steady market optimism. "
+                    f"Overall conditions look favorable for steady growth without unusual wild swings.\n\n"
+                    f"• **News & Social Sentiment:** Positive news coverage and upbeat sentiment across investors show strong confidence.\n"
+                    f"• **Buyer/Seller Demand:** Strong buying demand outweighs sellers, helping keep the price stable against sudden dips.\n"
+                    f"• **Price Momentum:** Healthy upward momentum shows steady buying strength without looking overstretched."
+                )
+            elif sig == "SELL":
+                explanation = (
+                    f"QuantEdge AI Insight cautions that selling pressure is rising for {ticker} as negative headlines and cautious trading take over. "
+                    f"The market shows increased turbulence, suggesting it may be wise to protect gains or reduce risk.\n\n"
+                    f"• **News & Social Sentiment:** Media coverage and online discussions have turned cautious, with growing concerns over near-term prospects.\n"
+                    f"• **Buyer/Seller Demand:** Sellers are outpacing buyers, meaning there is less demand support to catch falling prices.\n"
+                    f"• **Price Momentum:** Upward momentum is fading rapidly, increasing the chances of a noticeable price pullback."
+                )
+            else:
+                explanation = (
+                    f"QuantEdge AI Insight observes a balanced tug-of-war for {ticker} with buyers and sellers evenly matched. "
+                    f"With no strong catalyst pulling the stock in either direction, patience is the smartest approach right now.\n\n"
+                    f"• **News & Social Sentiment:** News headlines and social chatter are neutral, with investors awaiting clearer updates.\n"
+                    f"• **Buyer/Seller Demand:** Buying and selling orders are balanced, keeping the stock trading within a steady, normal range.\n"
+                    f"• **Price Momentum:** Price movement is moving sideways at a calm, predictable pace without sudden breakouts."
+                )
+        else:
+            sent_str = f"+{sentiment:.2f}" if sentiment >= 0 else f"{sentiment:.2f}"
+            if sig == "BUY":
+                explanation = (
+                    f"QuantEdge AI Insight confirms an AI Overall Signal of BUY for {ticker}, driven by constructive buyer/seller demand and positive sentiment velocity. "
+                    f"Multi-factor key price drivers indicate sustained upside expansion while technical momentum remains below extreme overbought resistance.\n\n"
+                    f"• **News & Social Sentiment ({sent_str}):** Sentiment metrics reflect robust positive news coverage and high institutional participation.\n"
+                    f"• **Buyer/Seller Demand:** {order_book} demonstrates heavy buy-side order book depth, mitigating downside slippage.\n"
+                    f"• **Price Momentum:** Price momentum oscillator (RSI) at {rsi:.1f} with {volatility} variance provides clear headroom for further breakout."
+                )
+            elif sig == "SELL":
+                explanation = (
+                    f"QuantEdge AI Insight flags an AI Overall Signal of SELL for {ticker} as order book liquidity deteriorates amid negative sentiment divergence. "
+                    f"Heightened volatility and weakening momentum suggest asymmetric downside risk.\n\n"
+                    f"• **News & Social Sentiment ({sent_str}):** Sentiment velocity reflects rapid institutional de-risking and spreading retail caution.\n"
+                    f"• **Buyer/Seller Demand:** {order_book} reveals thin bid-side depth across primary support levels, elevating drop vulnerability.\n"
+                    f"• **Price Momentum:** Price momentum oscillator (RSI) at {rsi:.1f} confirms fading momentum with {volatility} variance elevating correction risks."
+                )
+            else:
+                explanation = (
+                    f"QuantEdge AI Insight rates {ticker} with an AI Overall Signal of HOLD during rangebound consolidation with balanced factor vectors. "
+                    f"The asset remains in dynamic equilibrium, making capital preservation the optimal posture.\n\n"
+                    f"• **News & Social Sentiment ({sent_str}):** Balanced sentiment metrics indicate current corporate news is fully discounted by the market.\n"
+                    f"• **Buyer/Seller Demand:** {order_book} illustrates neutral bid-ask equilibrium without anomalous accumulation or distribution.\n"
+                    f"• **Price Momentum:** Price momentum oscillator (RSI) at {rsi:.1f} sits comfortably in the neutral channel with {volatility} variance indicating sideways trading."
+                )
+
+    return {
+        "ticker": ticker,
+        "signalType": sig,
+        "explanation": explanation,
+        "summary": explanation,
+        "factors": factors,
+        "userLevel": user_level,
         "generatedAt": _now_iso(),
     }
 

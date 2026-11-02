@@ -10,6 +10,7 @@ import '../providers/learning_provider.dart' show AppTab;
 import '../services/api_service.dart';
 import '../services/learning_engine_service.dart';
 import '../services/learning_service.dart';
+import '../services/qwen_xai_service.dart';
 import '../theme/app_theme.dart';
 
 enum AppPhase {
@@ -111,6 +112,12 @@ class QuizProvider extends ChangeNotifier {
     {'ticker': 'DIS', 'name': 'Walt Disney Co.'},
     {'ticker': 'BABA', 'name': 'Alibaba Group'},
   ];
+
+  // ─── Qwen XAI Narrative Service State ───────────────────────────────────
+  final QwenXaiService _qwenXaiService = const QwenXaiService();
+  final Map<String, String> _qwenExplanationCache = {};
+
+  QwenXaiService get qwenXaiService => _qwenXaiService;
 
   // ─── Disha's Learning Engine State ───────────────────────────────────────
   final LearningService _learningService = LearningService();
@@ -779,6 +786,30 @@ class QuizProvider extends ChangeNotifier {
       return '${asset.ticker} is trading in a neutral range with a $sentiment sentiment score. Recommendation is to hold.';
     }
     return '${asset.ticker} shows a confidence level of ${asset.confidence} driven by technical and sentiment factor alignment.';
+  }
+
+  // ─── Qwen XAI Narrative Copilot ──────────────────────────────────────────
+
+  Future<String> fetchQwenExplanation({
+    required String ticker,
+    required String signalType,
+    required Map<String, dynamic> factors,
+    int? userLevel,
+  }) async {
+    final effectiveLevel = userLevel ?? _userLevel;
+    final cacheKey =
+        '${ticker.toUpperCase()}_${signalType.toUpperCase()}_lvl$effectiveLevel';
+    if (_qwenExplanationCache.containsKey(cacheKey)) {
+      return _qwenExplanationCache[cacheKey]!;
+    }
+    final explanation = await _qwenXaiService.fetchExplanation(
+      ticker: ticker,
+      signalType: signalType,
+      factors: factors,
+      userLevel: effectiveLevel,
+    );
+    _qwenExplanationCache[cacheKey] = explanation;
+    return explanation;
   }
 
   // ─── Auth ────────────────────────────────────────────────────────────────

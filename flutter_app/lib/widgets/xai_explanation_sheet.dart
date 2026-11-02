@@ -5,12 +5,15 @@ import '../providers/quiz_provider.dart';
 import '../screens/ticker_detail_screen.dart';
 import '../theme/app_theme.dart';
 
-/// Shows an XAI Explanation Bottom Sheet Modal for a given ticker.
-/// Displays SHAP feature attributions, sentiment metrics, RSI, and level-tailored explanation.
+/// Shows an AI Explanation Bottom Sheet Modal for a given ticker.
+/// Features a Qwen-powered QuantEdge AI Insight natural-language narrative,
+/// dynamically calibrated to the user's Insight Depth (Level 1-2: Simple, Level 3-4: Advanced).
 void showXaiExplanationSheet(
   BuildContext context, {
   required String ticker,
   required bool isDarkMode,
+  String? signalType,
+  Map<String, dynamic>? liveFactors,
 }) {
   showModalBottomSheet(
     context: context,
@@ -22,6 +25,8 @@ void showXaiExplanationSheet(
     builder: (ctx) => _XaiExplanationSheetBody(
       ticker: ticker,
       isDarkMode: isDarkMode,
+      signalType: signalType,
+      liveFactors: liveFactors,
     ),
   );
 }
@@ -29,10 +34,14 @@ void showXaiExplanationSheet(
 class _XaiExplanationSheetBody extends StatefulWidget {
   final String ticker;
   final bool isDarkMode;
+  final String? signalType;
+  final Map<String, dynamic>? liveFactors;
 
   const _XaiExplanationSheetBody({
     required this.ticker,
     required this.isDarkMode,
+    this.signalType,
+    this.liveFactors,
   });
 
   @override
@@ -40,24 +49,141 @@ class _XaiExplanationSheetBody extends StatefulWidget {
       _XaiExplanationSheetBodyState();
 }
 
-class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
+class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody>
+    with SingleTickerProviderStateMixin {
   TickerDetail? _detail;
   bool _loading = true;
+
+  String? _qwenExplanation;
+  bool _loadingQwen = true;
+
+  late final AnimationController _animCtrl;
+  late final Animation<double> _fadeAnim;
+  late final Animation<Offset> _slideAnim;
 
   @override
   void initState() {
     super.initState();
-    _loadDetail();
+    _animCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 550),
+    );
+    _fadeAnim = CurvedAnimation(
+      parent: _animCtrl,
+      curve: Curves.easeOutCubic,
+    );
+    _slideAnim = Tween<Offset>(
+      begin: const Offset(0, 0.08),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animCtrl,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _loadData();
   }
 
-  Future<void> _loadDetail() async {
+  @override
+  void dispose() {
+    _animCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
     final quizProvider = context.read<QuizProvider>();
+    final int userLevel = quizProvider.userLevel;
+
+    // 1. Fetch detailed stats & price drivers
     final detail = await quizProvider.fetchTickerDetail(widget.ticker);
+
     if (mounted) {
       setState(() {
         _detail = detail;
         _loading = false;
       });
+    }
+
+    // 2. Synthesize factor map for QuantEdge AI Insight
+    final effectiveSignal = widget.signalType ?? detail?.aiSignal ?? 'BUY';
+    final effectiveFactors = <String, dynamic>{
+      'rsi': widget.liveFactors?['rsi'] ?? detail?.rsi ?? 52.0,
+      'sentiment': widget.liveFactors?['sentiment'] ??
+          detail?.sentimentScore ??
+          0.0,
+      'finbertSentiment': widget.liveFactors?['finbertSentiment'] ??
+          detail?.sentimentScore ??
+          0.0,
+      'volatility': widget.liveFactors?['volatility'] ?? '0.015 (Standard)',
+      'orderBookIntensity': widget.liveFactors?['orderBookIntensity'] ??
+          (detail != null && detail.factors.isNotEmpty
+              ? '${detail.factors.first.name} (${detail.factors.first.weight})'
+              : 'Institutional order clustering'),
+      'confidence': widget.liveFactors?['confidence'] ??
+          '${((detail?.aiConfidence ?? 0.85) * 100).toInt()}%',
+      'price': widget.liveFactors?['price'] ?? detail?.currentPrice ?? 0.0,
+      'changePercent': widget.liveFactors?['changePercent'] ??
+          detail?.changePercent ??
+          0.0,
+    };
+
+    // 3. Fetch QuantEdge AI Insight explanation with level controls
+    try {
+      final explanation = await quizProvider.fetchQwenExplanation(
+        ticker: widget.ticker,
+        signalType: effectiveSignal,
+        factors: effectiveFactors,
+        userLevel: userLevel,
+      );
+
+      if (mounted) {
+        setState(() {
+          _qwenExplanation = explanation;
+          _loadingQwen = false;
+        });
+        _animCtrl.forward();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadingQwen = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _regenerateCopilot() async {
+    if (_loadingQwen) return;
+    setState(() {
+      _loadingQwen = true;
+      _animCtrl.reset();
+    });
+
+    final quizProvider = context.read<QuizProvider>();
+    final int userLevel = quizProvider.userLevel;
+    final effectiveSignal = widget.signalType ?? _detail?.aiSignal ?? 'BUY';
+    final effectiveFactors = <String, dynamic>{
+      'rsi': widget.liveFactors?['rsi'] ?? _detail?.rsi ?? 52.0,
+      'finbertSentiment': widget.liveFactors?['finbertSentiment'] ??
+          _detail?.sentimentScore ??
+          0.0,
+      'volatility': widget.liveFactors?['volatility'] ?? '0.018',
+      'orderBookIntensity': widget.liveFactors?['orderBookIntensity'] ??
+          'Strong buyer demand',
+    };
+
+    final explanation = await quizProvider.qwenXaiService.fetchExplanation(
+      ticker: widget.ticker,
+      signalType: effectiveSignal,
+      factors: effectiveFactors,
+      userLevel: userLevel,
+    );
+
+    if (mounted) {
+      setState(() {
+        _qwenExplanation = explanation;
+        _loadingQwen = false;
+      });
+      _animCtrl.forward();
     }
   }
 
@@ -73,11 +199,14 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
         widget.isDarkMode ? Colors.black26 : const Color(0xFFF8FAFC);
 
     final userLevel = context.watch<QuizProvider>().userLevel;
+    final bool isSimple = userLevel <= 2;
+    final String depthLabel =
+        isSimple ? 'Insight Depth: Simple' : 'Insight Depth: Advanced';
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.72,
+      initialChildSize: isSimple ? 0.70 : 0.85,
       minChildSize: 0.45,
-      maxChildSize: 0.92,
+      maxChildSize: 0.95,
       expand: false,
       builder: (_, scrollController) {
         if (_loading) {
@@ -90,7 +219,7 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                 const CircularProgressIndicator(color: AppColors.emerald),
                 const SizedBox(height: 18),
                 Text(
-                  'Computing XAI attributions for ${widget.ticker}...',
+                  'Loading insight for ${widget.ticker}...',
                   style: TextStyle(fontSize: 13, color: secondaryColor),
                 ),
               ],
@@ -104,7 +233,7 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
             padding: const EdgeInsets.all(28),
             child: Center(
               child: Text(
-                'Could not load XAI explanation for ${widget.ticker}',
+                'Could not load data for ${widget.ticker}',
                 style: TextStyle(color: textColor),
               ),
             ),
@@ -195,32 +324,47 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                     ),
                   ],
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: signalColor.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: signalColor.withOpacity(0.4),
-                      width: 1.5,
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      'AI Overall Signal',
+                      style: TextStyle(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        color: mutedColor,
+                        letterSpacing: 0.5,
+                      ),
                     ),
-                  ),
-                  child: Text(
-                    detail.aiSignal,
-                    style: TextStyle(
-                      color: signalColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.0,
+                    const SizedBox(height: 3),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: signalColor.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: signalColor.withOpacity(0.4),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Text(
+                        detail.aiSignal,
+                        style: TextStyle(
+                          color: signalColor,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.0,
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ],
             ),
             const SizedBox(height: 18),
 
-            // Level & Badge banner
+            // Insight Depth Banner
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
@@ -232,12 +376,12 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.hub_outlined,
+                  const Icon(Icons.auto_awesome,
                       size: 16, color: AppColors.emerald),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'XAI Model Attribution (Level $userLevel)',
+                      'QuantEdge AI Insight • $depthLabel',
                       style: const TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w800,
@@ -247,7 +391,7 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                     ),
                   ),
                   Text(
-                    '${(detail.aiConfidence * 100).toInt()}% Conf.',
+                    '${(detail.aiConfidence * 100).toInt()}% Confidence',
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w900,
@@ -259,7 +403,7 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
             ),
             const SizedBox(height: 16),
 
-            // Key Technical & Sentiment Metrics Row
+            // Key Technical & Sentiment Metrics Row (Layman labeled)
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -268,12 +412,13 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
               ),
               child: Row(
                 children: [
+                  // News & Social Sentiment Column
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'FINBERT SENTIMENT',
+                          'NEWS & SOCIAL SENTIMENT',
                           style: TextStyle(
                             fontSize: 8,
                             fontWeight: FontWeight.w900,
@@ -282,48 +427,68 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              '${detail.sentimentScore >= 0 ? '+' : ''}${detail.sentimentScore.toStringAsFixed(2)}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
-                                color: detail.sentimentScore >= 0
-                                    ? AppColors.emerald
-                                    : AppColors.rose,
-                              ),
+                        if (isSimple) ...[
+                          Text(
+                            detail.sentimentScore > 0.1
+                                ? 'Positive & Optimistic'
+                                : (detail.sentimentScore < -0.1
+                                    ? 'Cautious & Cautious'
+                                    : 'Balanced & Neutral'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: detail.sentimentScore >= 0
+                                  ? AppColors.emerald
+                                  : AppColors.rose,
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              detail.sentimentScore > 0.1
-                                  ? '(Bullish)'
-                                  : (detail.sentimentScore < -0.1
-                                      ? '(Bearish)'
-                                      : '(Neutral)'),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: secondaryColor,
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Text(
+                                '${detail.sentimentScore >= 0 ? '+' : ''}${detail.sentimentScore.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                  color: detail.sentimentScore >= 0
+                                      ? AppColors.emerald
+                                      : AppColors.rose,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(width: 4),
+                              Text(
+                                detail.sentimentScore > 0.1
+                                    ? '(Bullish)'
+                                    : (detail.sentimentScore < -0.1
+                                        ? '(Bearish)'
+                                        : '(Neutral)'),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: secondaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
                   Container(
                     width: 1,
                     height: 28,
-                    color: widget.isDarkMode ? Colors.white12 : AppColors.lightBorder,
+                    color: widget.isDarkMode
+                        ? Colors.white12
+                        : AppColors.lightBorder,
                   ),
                   const SizedBox(width: 12),
+                  // Price Momentum Column
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'RSI (14)',
+                          isSimple ? 'PRICE MOMENTUM' : 'PRICE MOMENTUM (RSI)',
                           style: TextStyle(
                             fontSize: 8,
                             fontWeight: FontWeight.w900,
@@ -332,137 +497,315 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                           ),
                         ),
                         const SizedBox(height: 4),
-                        Row(
-                          children: [
-                            Text(
-                              detail.rsi.toStringAsFixed(1),
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w900,
-                                color: textColor,
-                              ),
+                        if (isSimple) ...[
+                          Text(
+                            detail.rsi > 70
+                                ? 'Strong Buying Wave'
+                                : (detail.rsi < 30
+                                    ? 'Oversold / Heavy Selling'
+                                    : 'Steady / Normal'),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: detail.rsi > 70
+                                  ? AppColors.amber
+                                  : (detail.rsi < 30
+                                      ? AppColors.rose
+                                      : textColor),
                             ),
-                            const SizedBox(width: 4),
-                            Text(
-                              detail.rsi > 70
-                                  ? '(Overbought)'
-                                  : (detail.rsi < 30 ? '(Oversold)' : '(Neutral)'),
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                                color: secondaryColor,
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              Text(
+                                detail.rsi.toStringAsFixed(1),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                  color: textColor,
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
+                              const SizedBox(width: 4),
+                              Text(
+                                detail.rsi > 70
+                                    ? '(Overbought)'
+                                    : (detail.rsi < 30
+                                        ? '(Oversold)'
+                                        : '(Neutral)'),
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                  color: secondaryColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 18),
+            const SizedBox(height: 20),
 
-            // Narrative XAI Insight
-            Text(
-              'EXPLANATION BREAKDOWN',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.5,
-                color: mutedColor,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              detail.xaiInsight,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.55,
-                fontWeight: FontWeight.w500,
-                color: textColor,
-              ),
-            ),
-            const SizedBox(height: 18),
-
-            // SHAP Feature Attribution Factors
-            Text(
-              'SHAP FEATURE ATTRIBUTIONS',
-              style: TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1.5,
-                color: mutedColor,
-              ),
-            ),
-            const SizedBox(height: 10),
-            ...detail.factors.map((f) => Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 28,
-                        height: 28,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: f.color.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
+            // ── QUANTEDGE AI INSIGHT NARRATIVE SECTION ─────────────────────────
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: BoxDecoration(
+                        color: AppColors.emerald.withOpacity(0.12),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: const Icon(
+                        Icons.auto_awesome,
+                        size: 13,
+                        color: AppColors.emerald,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'QUANTEDGE AI INSIGHT',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.5,
+                        color: textColor,
+                      ),
+                    ),
+                  ],
+                ),
+                GestureDetector(
+                  onTap: _regenerateCopilot,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: widget.isDarkMode
+                          ? Colors.white10
+                          : Colors.grey.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.refresh_rounded,
+                          size: 12,
+                          color: mutedColor,
                         ),
-                        child: Text(
-                          f.code,
+                        const SizedBox(width: 4),
+                        Text(
+                          'Re-explain',
                           style: TextStyle(
                             fontSize: 9,
-                            fontWeight: FontWeight.w900,
-                            color: f.color,
+                            fontWeight: FontWeight.w700,
+                            color: secondaryColor,
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Text(
-                                  f.name,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w700,
-                                    color: textColor,
-                                  ),
-                                ),
-                                Text(
-                                  f.weight,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w900,
-                                    color: f.color,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: f.percentage,
-                                minHeight: 6,
-                                backgroundColor: f.color.withOpacity(0.12),
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(f.color),
-                              ),
-                            ),
-                          ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // Copilot Content Box (Loading or Animated Markdown)
+            if (_loadingQwen)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: surfaceColor,
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: widget.isDarkMode
+                        ? Colors.white10
+                        : AppColors.lightBorder,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    const SizedBox(height: 10),
+                    const Center(
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: AppColors.emerald,
+                          strokeWidth: 2.2,
                         ),
                       ),
-                    ],
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'QuantEdge AI Insight is analyzing market conditions...',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: secondaryColor,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Evaluating news sentiment, buyer/seller demand, and price momentum.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: mutedColor,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                ),
+              )
+            else if (_qwenExplanation != null)
+              FadeTransition(
+                opacity: _fadeAnim,
+                child: SlideTransition(
+                  position: _slideAnim,
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: widget.isDarkMode
+                          ? AppColors.darkCard.withOpacity(0.6)
+                          : const Color(0xFFF9FBFA),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: AppColors.emerald.withOpacity(0.35),
+                        width: 1.5,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: AppColors.emerald.withOpacity(0.06),
+                          blurRadius: 18,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: _buildFormattedNarrative(
+                      _qwenExplanation!,
+                      widget.isDarkMode,
+                      textColor,
+                      secondaryColor,
+                    ),
                   ),
-                )),
+                ),
+              )
+            else
+              Text(
+                detail.xaiInsight,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.55,
+                  fontWeight: FontWeight.w500,
+                  color: textColor,
+                ),
+              ),
+
+            // ── DE-DUPLICATED FACTOR BARS: HIDE ON SIMPLE LEVEL ─────────────
+            // When userLevel <= 2, factor bars are hidden here to keep the sheet
+            // focused solely on the narrative. Static factor bars remain on TickerDetailScreen.
+            if (!isSimple) ...[
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'KEY PRICE DRIVERS',
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                      color: mutedColor,
+                    ),
+                  ),
+                  Text(
+                    'RELATIVE IMPACT',
+                    style: TextStyle(
+                      fontSize: 8,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.0,
+                      color: mutedColor,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ...detail.factors.map((f) => Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 28,
+                          height: 28,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: f.color.withOpacity(0.12),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            f.code,
+                            style: TextStyle(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w900,
+                              color: f.color,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    f.name,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  Text(
+                                    f.weight,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w900,
+                                      color: f.color,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(4),
+                                child: LinearProgressIndicator(
+                                  value: f.percentage,
+                                  minHeight: 6,
+                                  backgroundColor: f.color.withOpacity(0.12),
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(f.color),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+            ],
 
             if (detail.boldPrediction.isNotEmpty) ...[
-              const SizedBox(height: 12),
+              const SizedBox(height: 14),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -475,8 +818,8 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Icon(Icons.auto_awesome,
-                        size: 14, color: AppColors.amber),
+                    const Icon(Icons.bolt_rounded,
+                        size: 16, color: AppColors.amber),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -504,7 +847,7 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
               child: ElevatedButton.icon(
                 icon: const Icon(Icons.candlestick_chart_rounded, size: 16),
                 label: const Text(
-                  'Open Live Chart & Full Breakdown',
+                  'Open Live Chart & Key Price Drivers',
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -531,9 +874,141 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody> {
       },
     );
   }
+
+  /// Parses narrative into a formatted 2-sentence summary block and styled bullet list
+  Widget _buildFormattedNarrative(
+    String rawText,
+    bool isDark,
+    Color textColor,
+    Color secondaryColor,
+  ) {
+    final lines = rawText.split('\n').map((l) => l.trim()).toList();
+    final summaryLines = <String>[];
+    final bulletLines = <String>[];
+
+    for (final line in lines) {
+      if (line.isEmpty) continue;
+      if (line.startsWith('•') ||
+          line.startsWith('-') ||
+          line.startsWith('*')) {
+        bulletLines.add(line.replaceFirst(RegExp(r'^[•\-\*]\s*'), ''));
+      } else {
+        if (bulletLines.isEmpty) {
+          summaryLines.add(line);
+        } else {
+          bulletLines.add(line);
+        }
+      }
+    }
+
+    final summaryText = summaryLines.join(' ');
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (summaryText.isNotEmpty) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.emerald.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(12),
+              border: Border(
+                left: BorderSide(
+                  color: AppColors.emerald.withOpacity(0.7),
+                  width: 3.0,
+                ),
+              ),
+            ),
+            child: Text(
+              summaryText,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                height: 1.5,
+                color: textColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+        ...bulletLines.map((b) => Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 5, right: 8),
+                    width: 6,
+                    height: 6,
+                    decoration: const BoxDecoration(
+                      color: AppColors.emerald,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  Expanded(
+                    child:
+                        _buildRichMarkdownSpan(b, textColor, secondaryColor),
+                  ),
+                ],
+              ),
+            )),
+      ],
+    );
+  }
+
+  /// Helper to render markdown **bold** terms smoothly with Text.rich
+  Widget _buildRichMarkdownSpan(
+    String text,
+    Color textColor,
+    Color secondaryColor,
+  ) {
+    final spans = <TextSpan>[];
+    final regex = RegExp(r'\*\*(.*?)\*\*');
+    int lastEnd = 0;
+
+    for (final match in regex.allMatches(text)) {
+      if (match.start > lastEnd) {
+        spans.add(TextSpan(
+          text: text.substring(lastEnd, match.start),
+          style: TextStyle(
+            fontSize: 12,
+            height: 1.45,
+            color: secondaryColor,
+            fontWeight: FontWeight.w400,
+          ),
+        ));
+      }
+      spans.add(TextSpan(
+        text: match.group(1),
+        style: TextStyle(
+          fontSize: 12,
+          height: 1.45,
+          color: textColor,
+          fontWeight: FontWeight.w800,
+        ),
+      ));
+      lastEnd = match.end;
+    }
+
+    if (lastEnd < text.length) {
+      spans.add(TextSpan(
+        text: text.substring(lastEnd),
+        style: TextStyle(
+          fontSize: 12,
+          height: 1.45,
+          color: secondaryColor,
+          fontWeight: FontWeight.w400,
+        ),
+      ));
+    }
+
+    return Text.rich(
+      TextSpan(children: spans),
+    );
+  }
 }
 
-/// Shows a Factor Attribution Bottom Sheet for a market factor in MarketTab
+/// Shows a Key Price Driver Bottom Sheet for an influence vector in MarketTab
 void showFactorExplanationSheet(
   BuildContext context, {
   required FactorImpact factor,
@@ -546,19 +1021,19 @@ void showFactorExplanationSheet(
 
   final Map<String, String> factorDescriptions = {
     'VOL':
-        'Volume analysis examines trading activity velocity and order-book depth. Institutional orders manifest as abrupt volume spikes, signaling reliable trend continuation or impending reversal.',
+        'Buyer/Seller trading volume shows the strength of buying and selling pressure. When large institutional funds enter the market, sudden volume jumps confirm the reliability of the price direction.',
     'PR':
-        'Price trend and momentum model the slope of exponential moving averages against historical volatility channels, pinpointing high-probability breakout velocities.',
+        'Price momentum tracks how quickly and strongly a stock has been moving over recent days, spotting breakout moves before they become obvious.',
     'SN':
-        'FinBERT Natural Language Processing analyzes real-time sentiment streams across social feeds, financial news, and analyst revisions to compute collective market sentiment.',
+        'News & social sentiment analyzes financial news headlines, analyst reports, and social feeds to gauge investor optimism and market mood.',
     'VLT':
-        'Volatility index quantifies real-time variance and implied standard deviation across option strikes, flagging high-risk turbulence before price moves occur.',
+        'Market volatility measures how calm or turbulent price swings currently are, helping the AI adjust risk before sharp moves occur.',
     'RT':
-        'Retail order flow detects retail consensus clustering versus institutional block distribution, identifying contrarian reversal points.',
+        'Individual investor demand measures everyday retail activity versus large institutional funds to find key reversal turning points.',
   };
 
   final desc = factorDescriptions[factor.code.toUpperCase()] ??
-      '${factor.name} contributes ${(factor.percentage * 100).toInt()}% towards the AI recommendation engine, weighted via SHAP multi-factor attribution.';
+      '${factor.name} contributes ${(factor.percentage * 100).toInt()}% towards the AI recommendation engine as a key price driver.';
 
   showModalBottomSheet(
     context: context,
@@ -618,10 +1093,12 @@ void showFactorExplanationSheet(
                         ),
                       ),
                       Text(
-                        'SHAP Factor Vector',
+                        'Key Price Driver',
                         style: TextStyle(
                           fontSize: 10,
-                          color: isDarkMode ? Colors.white54 : AppColors.lightTextMuted,
+                          color: isDarkMode
+                              ? Colors.white54
+                              : AppColors.lightTextMuted,
                         ),
                       ),
                     ],
@@ -629,7 +1106,8 @@ void showFactorExplanationSheet(
                 ],
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: factor.color.withOpacity(0.12),
                   borderRadius: BorderRadius.circular(12),
@@ -657,7 +1135,7 @@ void showFactorExplanationSheet(
           ),
           const SizedBox(height: 16),
           Text(
-            'FACTOR ATTRIBUTION MECHANICS',
+            'PRICE DRIVER MECHANICS',
             style: TextStyle(
               fontSize: 9,
               fontWeight: FontWeight.w900,
@@ -688,11 +1166,13 @@ void showFactorExplanationSheet(
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Calibrated for Level $userLevel experience weighting',
+                    'Insight Depth: Level $userLevel (${userLevel <= 2 ? "Simple" : "Advanced"})',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: isDarkMode ? Colors.white60 : AppColors.lightTextSecondary,
+                      color: isDarkMode
+                          ? Colors.white60
+                          : AppColors.lightTextSecondary,
                     ),
                   ),
                 ),
@@ -721,4 +1201,3 @@ void showFactorExplanationSheet(
     ),
   );
 }
-
