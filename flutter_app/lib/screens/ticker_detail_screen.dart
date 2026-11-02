@@ -19,7 +19,6 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
   bool _loading = true;
   int? _hoveredIndex;
   String _selectedRange = '1W';
-  bool _showXaiPopover = false;
 
   late final AnimationController _fadeCtrl;
   late final Animation<double> _fadeAnim;
@@ -93,13 +92,13 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: AppColors.emerald.withOpacity(0.4)),
                 ),
-                child: Row(
+                child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.info_outline_rounded,
                       size: 14, color: AppColors.emerald),
-                    const SizedBox(width: 4),
-                    const Text('XAI',
+                    SizedBox(width: 4),
+                    Text('XAI',
                       style: TextStyle(
                         fontSize: 10, fontWeight: FontWeight.w900,
                         color: AppColors.emerald, letterSpacing: 0.8,
@@ -559,7 +558,7 @@ class _FactorImpactCard extends StatelessWidget {
               letterSpacing: 2.0,
               color: isDark ? Colors.white38 : AppColors.lightTextMuted)),
           const SizedBox(height: 4),
-          Text('Factor Impact Distribution',
+          const Text('Factor Impact Distribution',
             style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900,
               fontStyle: FontStyle.italic, color: AppColors.emerald)),
           const SizedBox(height: 12),

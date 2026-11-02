@@ -1,8 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../models/learning_models.dart';
+import '../providers/learning_provider.dart';
 import '../providers/quiz_provider.dart';
+import '../screens/learning_quiz_screen.dart';
 import '../theme/app_theme.dart';
 
+/// QuizTab — Disha's DuoLingo-style Learning Engine
+///
+/// Features:
+/// - Modules & Categories (15 progressive stock market curriculum topics)
+/// - Daily streaks counter with animated flame badge (🔥)
+/// - Overall progress & mastery bar
+/// - XP, Level, and Score summary stats
+/// - Interactive module quiz launcher (starts lesson and navigates to LearningQuizScreen)
 class QuizTab extends StatefulWidget {
   const QuizTab({super.key});
 
@@ -11,411 +22,639 @@ class QuizTab extends StatefulWidget {
 }
 
 class _QuizTabState extends State<QuizTab> {
-  String? _selectedOptionId;
-  bool _submitted = false;
-  bool _isCorrect = false;
-  bool _isFinished = false;
-  Map<String, dynamic>? _completionSummary;
+  static const Map<int, String> _scoreNames = {
+    1: 'Newbie',
+    2: 'Beginner',
+    3: 'Beginner+',
+    4: 'Intermediate',
+    5: 'Intermediate+',
+    6: 'Advanced',
+    7: 'Advanced+',
+    8: 'Expert',
+    9: 'Expert+',
+    10: 'Master',
+  };
 
-  // Accumulated definitions from answered questions for summary screen
-  final List<Map<String, String>> _answeredTerms = [];
+  String _scoreName(int score) => _scoreNames[score] ?? 'Newbie';
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────────────────────
-
-  List<Map<String, dynamic>> _options(Map<String, dynamic> question) {
-    final raw = question['options'];
-    if (raw == null) return [];
-    return (raw as List).map((o) => o as Map<String, dynamic>).toList();
-  }
-
-  String _questionText(Map<String, dynamic> q) =>
-      q['prompt'] ?? q['question'] ?? 'Question';
-
-  String _contextBlurb(Map<String, dynamic> q) =>
-      q['contextBlurb'] ?? q['blurb'] ?? '';
-
-  String _questionType(Map<String, dynamic> q) =>
-      q['type']?.toString() ?? 'GENERAL';
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Actions
-  // ─────────────────────────────────────────────────────────────────────────
-
-  void _submit(QuizProvider provider, String correctOptionId) {
-    if (_selectedOptionId == null) return;
-    setState(() {
-      _submitted = true;
-      _isCorrect = _selectedOptionId == correctOptionId;
-    });
-
-    // Record term/definition for summary
-    final q = provider.currentQuestion!;
-    _answeredTerms.add({
-      'term': _questionText(q),
-      'definition': q['contextBlurb'] ?? 'See the QuantEdge glossary for details.',
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<LearningProvider>().loadLearningData();
+      }
     });
   }
-
-  Future<void> _next(QuizProvider provider, String submittedOptionId) async {
-    setState(() {
-      _submitted = false;
-      _selectedOptionId = null;
-    });
-    await provider.submitQuizAnswer(submittedOptionId);
-  }
-
-  void _retake(QuizProvider provider) {
-    setState(() {
-      _isFinished = false;
-      _submitted = false;
-      _selectedOptionId = null;
-      _answeredTerms.clear();
-      _completionSummary = null;
-    });
-    provider.initQuizSession();
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Build
-  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final provider = context.watch<QuizProvider>();
-    final isDark = provider.isDarkMode;
+    final quizProvider = context.watch<QuizProvider>();
+    final isDark = quizProvider.isDarkMode;
     final textColor = isDark ? Colors.white : AppColors.lightTextPrimary;
     final mutedColor = isDark ? Colors.white54 : AppColors.lightTextMuted;
-    final surfaceColor = isDark ? AppColors.darkSurface : Colors.white;
 
-    // ── Finished Screen ───────────────────────────────────────────────────
-    if (_isFinished || (provider.currentQuestion == null && !provider.isLoadingQuiz)) {
-      final summary = _completionSummary ?? provider.completionSummary;
-      final xp = summary?['xpAwarded'] ?? 0;
-      final level = summary?['currentLevel'] ?? summary?['levelTier'] ?? provider.skillLevel;
-      final levelChanged = summary?['levelChanged'] == true;
+    return Consumer<LearningProvider>(
+      builder: (context, provider, _) {
+        final topics = provider.topics.isNotEmpty
+            ? provider.topics
+            : _fallbackCurriculumTopics();
 
-      return ListView(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
-        children: [
-          // Completion banner
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: AppColors.emerald.withOpacity(0.12),
-              borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: AppColors.emerald, width: 2),
-            ),
-            child: Column(children: [
-              const Icon(Icons.stars_rounded, color: AppColors.emerald, size: 48),
-              const SizedBox(height: 12),
-              Text('QUIZ COMPLETED!',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900,
-                      color: textColor, letterSpacing: 1.2)),
-              const SizedBox(height: 6),
-              Text('+$xp XP Earned',
-                  style: const TextStyle(color: AppColors.emerald, fontWeight: FontWeight.w700)),
-              if (levelChanged) ...[
-                const SizedBox(height: 4),
-                Text('Level progressed → ${level.toString().toUpperCase()}',
-                    style: const TextStyle(color: AppColors.amber, fontWeight: FontWeight.w600, fontSize: 12)),
-              ],
-            ]),
-          ),
-          const SizedBox(height: 24),
-
-          // Level badge
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: surfaceColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDark ? Colors.white12 : AppColors.lightBorder),
-            ),
-            child: Row(children: [
-              const Icon(Icons.bar_chart_rounded, color: AppColors.emerald, size: 20),
-              const SizedBox(width: 10),
-              Text('Current XAI Level: ${level.toString().toUpperCase()}',
-                  style: TextStyle(fontWeight: FontWeight.w800, color: textColor, fontSize: 13)),
-            ]),
-          ),
-          const SizedBox(height: 20),
-
-          // Definitions recap
-          if (_answeredTerms.isNotEmpty) ...[
-            Text('QUESTIONS COVERED',
-                style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
-                    letterSpacing: 1.5, color: mutedColor)),
-            const SizedBox(height: 12),
-            ..._answeredTerms.map((t) => Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: surfaceColor,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: isDark ? Colors.white12 : AppColors.lightBorder),
-                  ),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text(t['term'] ?? '', style: const TextStyle(
-                        fontWeight: FontWeight.w900, color: AppColors.emerald, fontSize: 14)),
-                    const SizedBox(height: 6),
-                    Text(t['definition'] ?? '',
-                        style: TextStyle(fontSize: 12, color: textColor, height: 1.4)),
-                  ]),
-                )),
-          ],
-
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.emerald,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                padding: const EdgeInsets.symmetric(vertical: 16),
+        return RefreshIndicator(
+          onRefresh: () async {
+            await provider.loadLearningData();
+          },
+          color: AppColors.emerald,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              // Header & Streak Bar
+              SliverToBoxAdapter(
+                child: _buildHeader(context, provider, isDark, textColor, mutedColor),
               ),
-              onPressed: () => _retake(provider),
-              child: const Text('RETAKE QUIZ',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900)),
+
+              // Progress & Stats Card (Streaks, XP, Score, Level)
+              SliverToBoxAdapter(
+                child: _buildProgressCard(context, provider, isDark, textColor, mutedColor),
+              ),
+
+              // Section Header
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'LEARNING MODULES',
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2.0,
+                          color: isDark ? Colors.white38 : AppColors.lightTextMuted,
+                        ),
+                      ),
+                      Text(
+                        '${topics.where((t) => t.completed).length}/${topics.length} COMPLETED',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.emerald,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Topic Modules List
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+                sliver: SliverList(
+                  delegate: SliverChildBuilderDelegate(
+                    (context, index) {
+                      final topic = topics[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildTopicCard(context, provider, topic, isDark, textColor, mutedColor),
+                      );
+                    },
+                    childCount: topics.length,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Header with Streak ──────────────────────────────────────────────────
+  Widget _buildHeader(
+    BuildContext context,
+    LearningProvider provider,
+    bool isDark,
+    Color text,
+    Color muted,
+  ) {
+    final raw = provider.lastRawResult;
+    final streak = raw != null && raw['currentStreak'] != null
+        ? (raw['currentStreak'] as num).toInt()
+        : 0;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'LEARNING ENGINE',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 2.0,
+                  color: AppColors.emerald,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Master Market Concepts',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                  fontStyle: FontStyle.italic,
+                  color: text,
+                ),
+              ),
+            ],
+          ),
+          // Animated Streak Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFF6D00).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFFFF6D00).withOpacity(0.4),
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Text('🔥', style: TextStyle(fontSize: 16)),
+                const SizedBox(width: 4),
+                Text(
+                  '$streak',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w900,
+                    color: Color(0xFFFF6D00),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
-      );
-    }
+      ),
+    );
+  }
 
-    // ── Loading ───────────────────────────────────────────────────────────
-    if (provider.isLoadingQuiz || provider.currentQuestion == null) {
-      return Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          const CircularProgressIndicator(color: AppColors.emerald),
-          const SizedBox(height: 16),
-          Text('Loading question from engine...',
-              style: TextStyle(color: mutedColor, fontSize: 13)),
-        ]),
-      );
-    }
+  // ── Progress & Mastery Card ─────────────────────────────────────────────
+  Widget _buildProgressCard(
+    BuildContext context,
+    LearningProvider provider,
+    bool isDark,
+    Color text,
+    Color muted,
+  ) {
+    final progress = provider.progress;
+    final score = progress?.score ?? 1;
+    final xp = progress?.xp ?? 0;
+    final levelName = _scoreName(score);
+    final topics = provider.topics;
+    final completedCount = topics.where((t) => t.completed).length;
+    final double completionPct = topics.isNotEmpty
+        ? (completedCount / topics.length).clamp(0.0, 1.0)
+        : 0.1;
 
-    // ── Active Question ───────────────────────────────────────────────────
-    final question = provider.currentQuestion!;
-    final options = _options(question);
-    final correct = question['correctOptionId'] as String? ?? '';
-    final blurb = _contextBlurb(question);
-    final qType = _questionType(question);
-
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(20, 16, 20, 110),
-      children: [
-        // Header
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Text('SKILL ASSESSMENT',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
-                  letterSpacing: 2.0, color: mutedColor)),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppColors.emerald.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Text('Level: ${provider.skillLevel.toUpperCase()}',
-                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
-                    color: AppColors.emerald)),
-          ),
-        ]),
-        const SizedBox(height: 12),
-
-        // Type badge
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(
-            color: _typeColor(qType).withOpacity(0.15),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Text(qType,
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900,
-                  color: _typeColor(qType))),
+    return Container(
+      margin: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: isDark ? AppColors.darkCard.withOpacity(0.5) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: isDark ? Colors.white10 : AppColors.lightBorder,
+          width: 1.5,
         ),
-        const SizedBox(height: 12),
-
-        // Question card
-        Container(
-          padding: const EdgeInsets.all(20),
-          decoration: BoxDecoration(
-            color: surfaceColor,
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-                color: isDark ? Colors.white12 : AppColors.lightBorder, width: 2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.04),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            // Context blurb (italicised scenario text)
-            if (blurb.isNotEmpty) ...[
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.emerald.withOpacity(0.07),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.emerald.withOpacity(0.3)),
-                ),
-                child: Text(blurb,
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildStatItem('SCORE', '$score/10', Icons.star_rounded, AppColors.amber),
+              ),
+              _buildDivider(isDark),
+              Expanded(
+                child: _buildStatItem('XP EARNED', '$xp', Icons.bolt_rounded, AppColors.emerald),
+              ),
+              _buildDivider(isDark),
+              Expanded(
+                child: _buildStatItem('LEVEL', levelName, Icons.trending_up_rounded, AppColors.blue),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          // Progress bar
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'CURRICULUM MASTERY',
                     style: TextStyle(
-                        fontStyle: FontStyle.italic,
-                        fontSize: 12,
-                        color: textColor.withOpacity(0.85),
-                        height: 1.4)),
-              ),
-              const SizedBox(height: 16),
-            ],
-
-            // Question text
-            Text(_questionText(question),
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800,
-                    color: textColor, height: 1.3)),
-            const SizedBox(height: 20),
-
-            // Options
-            ...options.map((opt) {
-              final id = opt['id'] as String? ?? '';
-              final text = opt['text'] as String? ?? '';
-              final isSelected = _selectedOptionId == id;
-              final isCorrectOpt = id == correct;
-
-              Color borderColor = Colors.transparent;
-              Color bgColor = isDark ? Colors.black26 : const Color(0xFFF8FAFC);
-
-              if (_submitted) {
-                if (isCorrectOpt) {
-                  borderColor = AppColors.emerald;
-                  bgColor = AppColors.emerald.withOpacity(0.12);
-                } else if (isSelected && !isCorrectOpt) {
-                  borderColor = AppColors.rose;
-                  bgColor = AppColors.rose.withOpacity(0.10);
-                }
-              } else if (isSelected) {
-                borderColor = AppColors.emerald;
-                bgColor = AppColors.emerald.withOpacity(0.12);
-              }
-
-              return GestureDetector(
-                onTap: _submitted ? null : () => setState(() => _selectedOptionId = id),
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: bgColor,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: borderColor, width: 2),
-                  ),
-                  child: Row(children: [
-                    Container(
-                      width: 28, height: 28,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: isSelected && !_submitted ? AppColors.emerald
-                            : _submitted && isCorrectOpt ? AppColors.emerald
-                            : _submitted && isSelected ? AppColors.rose
-                            : Colors.transparent,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: isSelected ? AppColors.emerald
-                              : Colors.grey.shade400,
-                        ),
-                      ),
-                      child: _submitted && isCorrectOpt
-                          ? const Icon(Icons.check, size: 14, color: Colors.white)
-                          : _submitted && isSelected && !isCorrectOpt
-                              ? const Icon(Icons.close, size: 14, color: Colors.white)
-                              : Text(id,
-                                  style: TextStyle(
-                                      fontWeight: FontWeight.w900, fontSize: 12,
-                                      color: isSelected ? Colors.white
-                                          : (isDark ? Colors.white70 : Colors.black87))),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(text,
-                          style: TextStyle(fontSize: 13, color: textColor,
-                              fontWeight: FontWeight.w600)),
-                    ),
-                  ]),
-                ),
-              );
-            }),
-
-            // Feedback after submit
-            if (_submitted) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: (_isCorrect ? AppColors.emerald : AppColors.rose).withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(children: [
-                  Icon(_isCorrect ? Icons.check_circle_outline : Icons.info_outline,
-                      color: _isCorrect ? AppColors.emerald : AppColors.rose, size: 18),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      _isCorrect
-                          ? 'Correct! Great analysis.'
-                          : 'Not quite — review the context blurb above.',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: _isCorrect ? AppColors.emerald : AppColors.rose,
-                          fontWeight: FontWeight.w600),
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                      color: isDark ? Colors.white38 : AppColors.lightTextMuted,
                     ),
                   ),
-                ]),
+                  Text(
+                    '${(completionPct * 100).toInt()}%',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      color: AppColors.emerald,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: LinearProgressIndicator(
+                  value: completionPct,
+                  minHeight: 8,
+                  backgroundColor: isDark ? Colors.white10 : AppColors.lightBorder,
+                  valueColor: const AlwaysStoppedAnimation<Color>(AppColors.emerald),
+                ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
 
-            const SizedBox(height: 14),
-
-            // Action button
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.emerald,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                ),
-                onPressed: () {
-                  if (!_submitted) {
-                    if (_selectedOptionId != null) _submit(provider, correct);
-                  } else {
-                    // Capture before clearing
-                    final captured = _selectedOptionId ?? 'A';
-                    _next(provider, captured).then((_) {
-                      if (provider.currentQuestion == null) {
-                        setState(() {
-                          _isFinished = true;
-                          _completionSummary =
-                              provider.completionSummary;
-                        });
-                      }
-                    });
-                  }
-                },
-                child: Text(
-                  _submitted ? 'NEXT QUESTION →' : 'SUBMIT ANSWER',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900),
-                ),
-              ),
-            ),
-          ]),
+  Widget _buildStatItem(String label, String value, IconData icon, Color color) {
+    return Column(
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 8,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.0,
+            color: AppColors.lightTextMuted,
+          ),
         ),
       ],
     );
   }
 
-  Color _typeColor(String type) {
-    switch (type.toUpperCase()) {
-      case 'XAI':       return AppColors.emerald;
-      case 'TECHNICAL': return AppColors.blue;
-      case 'SENTIMENT': return AppColors.amber;
-      case 'SCENARIO':  return AppColors.rose;
-      default:          return Colors.grey;
+  Widget _buildDivider(bool isDark) {
+    return Container(
+      height: 32,
+      width: 1,
+      color: isDark ? Colors.white12 : AppColors.lightBorder,
+    );
+  }
+
+  // ── Topic Module Card ───────────────────────────────────────────────────
+  Widget _buildTopicCard(
+    BuildContext context,
+    LearningProvider provider,
+    LearningTopic topic,
+    bool isDark,
+    Color text,
+    Color muted,
+  ) {
+    final isLocked = !topic.unlocked;
+    final isCompleted = topic.completed;
+    final isCurrent = topic.status == 'current';
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: isLocked
+          ? () => _showLockedSnackBar(context)
+          : () => _startTopicLesson(context, provider, topic),
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: isLocked ? 0.55 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkCard.withOpacity(0.5) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: isCurrent
+                  ? AppColors.emerald
+                  : (isDark ? Colors.white10 : AppColors.lightBorder),
+              width: isCurrent ? 2 : 1,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(isDark ? 0.2 : 0.03),
+                blurRadius: 10,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              // Topic Icon / Status Avatar
+              Container(
+                width: 46,
+                height: 46,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isCompleted
+                      ? AppColors.emerald.withOpacity(0.18)
+                      : (isCurrent
+                          ? AppColors.emerald.withOpacity(0.12)
+                          : (isDark ? Colors.white10 : const Color(0xFFF1F5F9))),
+                ),
+                child: Text(
+                  topic.icon.isNotEmpty ? topic.icon : '📚',
+                  style: const TextStyle(fontSize: 22),
+                ),
+              ),
+              const SizedBox(width: 14),
+
+              // Topic Info
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'TOPIC ${topic.number}',
+                          style: const TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.0,
+                            color: AppColors.emerald,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildStatusBadge(topic),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      topic.title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      topic.description,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        height: 1.3,
+                        color: muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+
+              // Trailing action icon
+              Icon(
+                isLocked
+                    ? Icons.lock_rounded
+                    : (isCompleted ? Icons.check_circle_rounded : Icons.arrow_forward_ios_rounded),
+                size: isLocked ? 18 : (isCompleted ? 20 : 16),
+                color: isLocked
+                    ? (isDark ? Colors.white24 : AppColors.lightTextMuted)
+                    : (isCompleted ? AppColors.emerald : AppColors.emerald),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBadge(LearningTopic topic) {
+    String label = 'LOCKED';
+    Color bg = Colors.grey.withOpacity(0.15);
+    Color fg = Colors.grey;
+
+    if (topic.completed) {
+      label = 'COMPLETED';
+      bg = AppColors.emerald.withOpacity(0.15);
+      fg = AppColors.emerald;
+    } else if (topic.status == 'current') {
+      label = 'CURRENT';
+      bg = AppColors.blue.withOpacity(0.15);
+      fg = AppColors.blue;
+    } else if (topic.unlocked) {
+      label = 'AVAILABLE';
+      bg = AppColors.amber.withOpacity(0.15);
+      fg = AppColors.amber;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 8,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.5,
+          color: fg,
+        ),
+      ),
+    );
+  }
+
+  void _showLockedSnackBar(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Pass previous topics with 8/10 to unlock this module.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _startTopicLesson(
+    BuildContext context,
+    LearningProvider provider,
+    LearningTopic topic,
+  ) async {
+    final nav = Navigator.of(context, rootNavigator: true);
+    final localNav = Navigator.of(context);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Dialog(
+        child: Padding(
+          padding: EdgeInsets.all(20),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: AppColors.emerald,
+                ),
+              ),
+              SizedBox(width: 16),
+              Flexible(child: Text('Generating adaptive lesson…')),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    bool started = false;
+    try {
+      started = await provider.startLesson(topic.id);
+    } finally {
+      if (nav.canPop()) {
+        nav.pop();
+      }
+    }
+
+    if (!mounted) return;
+
+    if (started) {
+      await localNav.push(
+        MaterialPageRoute(
+          builder: (_) => const LearningQuizScreen(),
+        ),
+      );
+      if (mounted) {
+        provider.loadLearningData();
+      }
+    } else {
+      scaffoldMessenger.showSnackBar(
+        SnackBar(
+          content: Text(provider.error ?? 'Could not start lesson. Please verify backend connection.'),
+        ),
+      );
     }
   }
+
+  static List<LearningTopic> _fallbackCurriculumTopics() => [
+    LearningTopic(
+      id: 'topic_01',
+      number: 1,
+      title: 'Stock Market Basics',
+      description: 'Understand public markets, shares, and basic exchanges.',
+      status: 'current',
+      unlocked: true,
+      completed: false,
+      subtopics: const ['Exchanges', 'Shares', 'Orders'],
+      icon: '📈',
+    ),
+    LearningTopic(
+      id: 'topic_02',
+      number: 2,
+      title: 'Stock Ownership & Exchanges',
+      description: 'How equities, brokers, and market orders operate.',
+      status: 'available',
+      unlocked: true,
+      completed: false,
+      subtopics: const ['Brokers', 'Order Execution', 'Clearing'],
+      icon: '🏛️',
+    ),
+    LearningTopic(
+      id: 'topic_03',
+      number: 3,
+      title: 'Stock Prices & Market Capitalization',
+      description: 'Valuation scale, mega-cap vs. small-cap asset classes.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Market Cap', 'Stock Splits', 'Free Float'],
+      icon: '💰',
+    ),
+    LearningTopic(
+      id: 'topic_04',
+      number: 4,
+      title: 'Reading Stock Charts',
+      description: 'Candlesticks, volume bars, and price action patterns.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Candlesticks', 'Volume', 'Trends'],
+      icon: '📊',
+    ),
+    LearningTopic(
+      id: 'topic_05',
+      number: 5,
+      title: 'Fundamental Analysis',
+      description: 'Balance sheets, cash flows, and corporate earnings.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Balance Sheets', 'Income Statements', 'Free Cash Flow'],
+      icon: '📑',
+    ),
+    LearningTopic(
+      id: 'topic_06',
+      number: 6,
+      title: 'Valuation Ratios',
+      description: 'P/E, P/B, EV/EBITDA, and comparative peer valuation.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['P/E Ratio', 'P/B Ratio', 'EV/EBITDA'],
+      icon: '📐',
+    ),
+    LearningTopic(
+      id: 'topic_07',
+      number: 7,
+      title: 'Technical Analysis',
+      description: 'RSI, moving averages, Bollinger bands, and momentum.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['RSI', 'Moving Averages', 'MACD'],
+      icon: '📉',
+    ),
+    LearningTopic(
+      id: 'topic_08',
+      number: 8,
+      title: 'Risk Management',
+      description: 'Position sizing, stop losses, and downside protection.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Position Sizing', 'Stop Loss', 'Risk/Reward'],
+      icon: '🛡️',
+    ),
+  ];
 }

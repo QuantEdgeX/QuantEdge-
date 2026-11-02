@@ -5,8 +5,11 @@ import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../models/app_models.dart';
+import '../models/learning_models.dart';
+import '../providers/learning_provider.dart' show AppTab;
 import '../services/api_service.dart';
 import '../services/learning_engine_service.dart';
+import '../services/learning_service.dart';
 import '../theme/app_theme.dart';
 
 enum AppPhase {
@@ -21,12 +24,6 @@ enum AppPhase {
   mainApp,
 }
 
-enum AppTab {
-  dashboard,
-  quiz,
-  portfolio,
-  assistant
-}
 
 class QuizProvider extends ChangeNotifier {
   final ApiService _apiService = ApiService();
@@ -115,6 +112,24 @@ class QuizProvider extends ChangeNotifier {
     {'ticker': 'BABA', 'name': 'Alibaba Group'},
   ];
 
+  // ─── Disha's Learning Engine State ───────────────────────────────────────
+  final LearningService _learningService = LearningService();
+  final String _learningUserId = 'disha1_test';
+  List<LearningTopic> _learningTopics = [];
+  LearningProgress? _learningProgress;
+  LearningLesson? _currentLearningLesson;
+  List<LearningQuestion> _learningQuestions = [];
+  int _learningTotalQuestions = 10;
+  int _currentLearningQuestionIndex = 0;
+  String? _selectedLearningOptionId;
+  AnswerResult? _lastLearningAnswerResult;
+  Map<String, dynamic>? _lastLearningRawResult;
+  bool _learningLessonComplete = false;
+  bool _learningLessonPassed = false;
+  bool _isLoadingLearning = false;
+  bool _isSubmittingLearningAnswer = false;
+  String? _learningError;
+
   QuizProvider() {
     _initInitialData();
   }
@@ -176,6 +191,35 @@ class QuizProvider extends ChangeNotifier {
   bool get isLoadingTickerDetail => _isLoadingTickerDetail;
   Map<String, TickerDetail> get tickerDetailCache => _tickerDetailCache;
   List<Map<String, String>> get popularTickers => _popularTickers;
+
+  // Disha's Learning Engine Getters
+  String get learningUserId => _learningUserId;
+  List<LearningTopic> get learningTopics => _learningTopics;
+  LearningProgress? get learningProgress => _learningProgress;
+  LearningLesson? get currentLearningLesson => _currentLearningLesson;
+  List<LearningQuestion> get learningQuestions => _learningQuestions;
+  int get currentLearningQuestionIndex => _currentLearningQuestionIndex;
+  LearningQuestion? get currentLearningQuestion {
+    if (_currentLearningLesson == null || _currentLearningQuestionIndex >= _learningQuestions.length) {
+      return null;
+    }
+    return _learningQuestions[_currentLearningQuestionIndex];
+  }
+  String? get selectedLearningOptionId => _selectedLearningOptionId;
+  AnswerResult? get lastLearningAnswerResult => _lastLearningAnswerResult;
+  Map<String, dynamic>? get lastLearningRawResult => _lastLearningRawResult;
+  bool get learningLessonComplete => _learningLessonComplete;
+  bool get learningLessonPassed => _learningLessonPassed;
+  bool get isLoadingLearning => _isLoadingLearning;
+  bool get isSubmittingLearningAnswer => _isSubmittingLearningAnswer;
+  String? get learningError => _learningError;
+  int get learningTotalQuestions => _currentLearningLesson == null ? 0 : _learningTotalQuestions;
+  int get learningQuestionNumber => _currentLearningQuestionIndex + 1;
+  int get learningStreak => _lastLearningRawResult != null
+      ? ((_lastLearningRawResult!['currentStreak'] as num?)?.toInt() ?? 0)
+      : 0;
+  int get learningXp => _learningProgress?.xp ?? 0;
+  int get learningScore => _learningProgress?.score ?? 0;
 
   // Navigation & UI Actions
   void toggleTheme() {
@@ -345,7 +389,249 @@ class QuizProvider extends ChangeNotifier {
     unawaited(refreshMarketData());
     unawaited(refreshDashboardMetrics());
     unawaited(refreshPortfolioData());
+    unawaited(loadLearningData());
   }
+
+  // ─── Disha's Learning Engine Actions ─────────────────────────────────────
+
+  Future<void> loadLearningData() async {
+    _isLoadingLearning = true;
+    _learningError = null;
+    notifyListeners();
+
+    try {
+      final results = await Future.wait([
+        _learningService.getTopics(userId: _learningUserId),
+        _learningService.getProgress(_learningUserId),
+      ]);
+
+      final topicsJson = results[0]['topics'] as List? ?? [];
+      _learningTopics = topicsJson
+          .map((t) => LearningTopic.fromJson(t as Map<String, dynamic>))
+          .toList();
+      _learningProgress = LearningProgress.fromJson(results[1]);
+    } catch (e) {
+      _learningError = e.toString();
+      if (_learningTopics.isEmpty) {
+        _learningTopics = _fallbackCurriculumTopics();
+      }
+    } finally {
+      _isLoadingLearning = false;
+      notifyListeners();
+    }
+  }
+
+  Future<bool> startLearningLesson([String? topicId]) async {
+    _isLoadingLearning = true;
+    _learningError = null;
+    notifyListeners();
+
+    try {
+      final data = await _learningService.startLesson(_learningUserId, topicId: topicId);
+      if (data['completedAllTopics'] == true) {
+        _learningError = (data['message'] as String?) ?? 'All topics completed!';
+        return false;
+      }
+      final rawQuestion = data['question'];
+      if (rawQuestion is! Map) {
+        _learningError = 'Could not generate lesson question.';
+        return false;
+      }
+      final normalized = Map<String, dynamic>.from(data);
+      if (normalized['questions'] is! List || (normalized['questions'] as List).isEmpty) {
+        normalized['questions'] = [rawQuestion];
+      }
+      final topic = data['topic'];
+      if (topic is Map) {
+        normalized['topicId'] ??= topic['id'];
+        normalized['topicTitle'] ??= topic['title'];
+      }
+      final lesson = LearningLesson.fromJson(normalized);
+      _currentLearningLesson = lesson;
+      _learningQuestions = List<LearningQuestion>.from(lesson.questions);
+      _learningTotalQuestions = (data['totalQuestions'] as num?)?.toInt() ?? 10;
+      _currentLearningQuestionIndex = 0;
+      _selectedLearningOptionId = null;
+      _lastLearningAnswerResult = null;
+      _lastLearningRawResult = null;
+      _learningLessonComplete = false;
+      _learningLessonPassed = false;
+      return true;
+    } catch (e) {
+      _learningError = e.toString();
+      return false;
+    } finally {
+      _isLoadingLearning = false;
+      notifyListeners();
+    }
+  }
+
+  void selectLearningAnswer(String optionId) {
+    if (_learningLessonComplete || _isSubmittingLearningAnswer || _lastLearningAnswerResult != null) return;
+    _selectedLearningOptionId = optionId;
+    notifyListeners();
+  }
+
+  Future<bool> submitLearningAnswer() async {
+    if (_selectedLearningOptionId == null || _isSubmittingLearningAnswer || _currentLearningLesson == null) {
+      return false;
+    }
+    final question = currentLearningQuestion;
+    if (question == null) return false;
+
+    _isSubmittingLearningAnswer = true;
+    _learningError = null;
+    notifyListeners();
+
+    try {
+      final data = await _learningService.submitAnswer(
+        userId: _learningUserId,
+        lessonId: _currentLearningLesson!.lessonId,
+        questionId: question.id,
+        selectedOptionId: _selectedLearningOptionId!,
+      );
+
+      final result = AnswerResult.fromJson(data);
+      _lastLearningRawResult = Map<String, dynamic>.from(data);
+
+      if (!result.lessonComplete) {
+        final rawNext = data['nextQuestion'];
+        if (rawNext is Map) {
+          _learningQuestions.add(LearningQuestion.fromJson(Map<String, dynamic>.from(rawNext)));
+        }
+      }
+
+      _lastLearningAnswerResult = result;
+      if (result.lessonComplete) {
+        _learningLessonComplete = true;
+        _learningLessonPassed = result.passed;
+        await loadLearningData();
+      }
+      return true;
+    } catch (e) {
+      _learningError = e.toString();
+      return false;
+    } finally {
+      _isSubmittingLearningAnswer = false;
+      notifyListeners();
+    }
+  }
+
+  void nextLearningQuestion() {
+    if (_currentLearningLesson == null || _learningLessonComplete || _lastLearningAnswerResult == null) return;
+    if (_currentLearningQuestionIndex >= _learningQuestions.length - 1) return;
+    _currentLearningQuestionIndex++;
+    _selectedLearningOptionId = null;
+    _lastLearningAnswerResult = null;
+    _lastLearningRawResult = null;
+    notifyListeners();
+  }
+
+  Future<bool> retryLearningLesson() => startLearningLesson(_currentLearningLesson?.topicId);
+
+  void clearLearningLesson() {
+    _currentLearningLesson = null;
+    _learningQuestions = [];
+    _learningTotalQuestions = 10;
+    _currentLearningQuestionIndex = 0;
+    _selectedLearningOptionId = null;
+    _lastLearningAnswerResult = null;
+    _lastLearningRawResult = null;
+    _learningLessonComplete = false;
+    _learningLessonPassed = false;
+    notifyListeners();
+  }
+
+  static List<LearningTopic> _fallbackCurriculumTopics() => [
+    LearningTopic(
+      id: 'topic_01',
+      number: 1,
+      title: 'Stock Market Basics',
+      description: 'Understand public markets, shares, and basic exchanges.',
+      status: 'current',
+      unlocked: true,
+      completed: false,
+      subtopics: const ['Exchanges', 'Shares', 'Orders'],
+      icon: '📈',
+    ),
+    LearningTopic(
+      id: 'topic_02',
+      number: 2,
+      title: 'Stock Ownership & Exchanges',
+      description: 'How equities, brokers, and market orders operate.',
+      status: 'available',
+      unlocked: true,
+      completed: false,
+      subtopics: const ['Brokers', 'Order Execution', 'Clearing'],
+      icon: '🏛️',
+    ),
+    LearningTopic(
+      id: 'topic_03',
+      number: 3,
+      title: 'Stock Prices & Market Capitalization',
+      description: 'Valuation scale, mega-cap vs. small-cap asset classes.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Market Cap', 'Stock Splits', 'Free Float'],
+      icon: '💰',
+    ),
+    LearningTopic(
+      id: 'topic_04',
+      number: 4,
+      title: 'Reading Stock Charts',
+      description: 'Candlesticks, volume bars, and price action patterns.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Candlesticks', 'Volume', 'Trends'],
+      icon: '📊',
+    ),
+    LearningTopic(
+      id: 'topic_05',
+      number: 5,
+      title: 'Fundamental Analysis',
+      description: 'Balance sheets, cash flows, and corporate earnings.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Balance Sheets', 'Income Statements', 'Free Cash Flow'],
+      icon: '📑',
+    ),
+    LearningTopic(
+      id: 'topic_06',
+      number: 6,
+      title: 'Valuation Ratios',
+      description: 'P/E, P/B, EV/EBITDA, and comparative peer valuation.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['P/E Ratio', 'P/B Ratio', 'EV/EBITDA'],
+      icon: '📐',
+    ),
+    LearningTopic(
+      id: 'topic_07',
+      number: 7,
+      title: 'Technical Analysis',
+      description: 'RSI, moving averages, Bollinger bands, and momentum.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['RSI', 'Moving Averages', 'MACD'],
+      icon: '📉',
+    ),
+    LearningTopic(
+      id: 'topic_08',
+      number: 8,
+      title: 'Risk Management',
+      description: 'Position sizing, stop losses, and downside protection.',
+      status: 'locked',
+      unlocked: false,
+      completed: false,
+      subtopics: const ['Position Sizing', 'Stop Loss', 'Risk/Reward'],
+      icon: '🛡️',
+    ),
+  ];
 
   Future<void> refreshDashboardMetrics() async {
     _isLoadingDashboard = true;
@@ -584,7 +870,7 @@ class QuizProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final uri = Uri.parse(
-        'http://127.0.0.1:8000/api/tickers/search?q=' + Uri.encodeComponent(query),
+        'http://127.0.0.1:8000/api/tickers/search?q=${Uri.encodeComponent(query)}',
       );
       final response = await http.get(uri).timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
@@ -624,10 +910,7 @@ class QuizProvider extends ChangeNotifier {
     notifyListeners();
     try {
       final uri = Uri.parse(
-        'http://127.0.0.1:8000/api/tickers/' +
-            ticker +
-            '/detail?xaiLevel=' +
-            _userLevel.toString(),
+        'http://127.0.0.1:8000/api/tickers/$ticker/detail?xaiLevel=$_userLevel',
       );
       final response = await http.get(uri).timeout(const Duration(seconds: 6));
       if (response.statusCode == 200) {
@@ -639,7 +922,7 @@ class QuizProvider extends ChangeNotifier {
         return detail;
       }
     } catch (e) {
-      debugPrint('fetchTickerDetail error: ' + e.toString());
+      debugPrint('fetchTickerDetail error: $e');
     }
     final mock = _mockTickerDetail(ticker);
     _tickerDetailCache[ticker] = mock;

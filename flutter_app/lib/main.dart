@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'theme/app_theme.dart';
 import 'providers/quiz_provider.dart';
+import 'providers/learning_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 // Existing screens — unchanged
@@ -29,8 +30,11 @@ void main() async {
   }
   
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => QuizProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => QuizProvider()),
+        ChangeNotifierProvider(create: (_) => LearningProvider()),
+      ],
       child: const QuantEdgeApp(),
     ),
   );
@@ -157,7 +161,7 @@ class _PhoneShell extends StatelessWidget {
                     ],
                   )
                 else
-                  Text(
+                  const Text(
                     'QuantEdge',
                     style: TextStyle(
                       fontSize: 18,
@@ -327,7 +331,7 @@ class _PhoneShell extends StatelessWidget {
       case AppPhase.assessmentComplete:
         return const LevelCelebrationScreen();
       case AppPhase.tour:
-        return AppTourOverlay(child: const MainWorkspaceScreen());
+        return const AppTourOverlay(child: MainWorkspaceScreen());
       case AppPhase.tickerSelection:
         return const TickerSelectionScreen();
       case AppPhase.mainApp:

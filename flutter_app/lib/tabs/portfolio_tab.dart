@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/quiz_provider.dart';
-import '../theme/app_theme.dart';
 import '../screens/ticker_detail_screen.dart';
-import '../screens/profile_settings_screen.dart';
+import '../theme/app_theme.dart';
+import '../widgets/xai_explanation_sheet.dart';
 
 class PortfolioTab extends StatelessWidget {
   const PortfolioTab({super.key});
@@ -197,7 +197,8 @@ class PortfolioTab extends StatelessWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => TickerDetailScreen(ticker: holding.symbol),
+                      builder: (_) =>
+                          TickerDetailScreen(ticker: holding.symbol),
                     ),
                   );
                 },
@@ -213,6 +214,15 @@ class PortfolioTab extends StatelessWidget {
                       color: isDark ? Colors.white12 : AppColors.lightBorder,
                       width: 2,
                     ),
+                    boxShadow: isDark
+                        ? []
+                        : [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.03),
+                              blurRadius: 16,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -223,14 +233,62 @@ class PortfolioTab extends StatelessWidget {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                holding.symbol,
-                                style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w700,
-                                  color: textColor,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    holding.symbol,
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w800,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  InkWell(
+                                    onTap: () {
+                                      showXaiExplanationSheet(
+                                        context,
+                                        ticker: holding.symbol,
+                                        isDarkMode: isDark,
+                                      );
+                                    },
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color:
+                                            AppColors.emerald.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: AppColors.emerald
+                                              .withOpacity(0.35),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: const Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(AppIcons.info,
+                                              size: 11,
+                                              color: AppColors.emerald),
+                                          SizedBox(width: 4),
+                                          Text(
+                                            'Explain Position',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              color: AppColors.emerald,
+                                              letterSpacing: 0.3,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
+                              const SizedBox(height: 2),
                               Text(
                                 holding.name,
                                 style: TextStyle(
@@ -323,28 +381,51 @@ class PortfolioTab extends StatelessWidget {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 14),
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.end,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            'VIEW ANOMALY & XAI DETAIL',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.0,
-                              color: AppColors.emerald,
-                            ),
+                          Row(
+                            children: [
+                              const Icon(Icons.hub_outlined,
+                                  size: 13, color: AppColors.emerald),
+                              const SizedBox(width: 6),
+                              Text(
+                                'VIEW ANOMALY & XAI DETAIL',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.0,
+                                  color: isDark
+                                      ? Colors.white54
+                                      : AppColors.lightTextSecondary,
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 4),
-                          const Icon(Icons.arrow_forward_ios_rounded, size: 9, color: AppColors.emerald),
+                          const Row(
+                            children: [
+                              Text(
+                                'VIEW DETAIL',
+                                style: TextStyle(
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.0,
+                                  color: AppColors.emerald,
+                                ),
+                              ),
+                              SizedBox(width: 4),
+                              Icon(Icons.arrow_forward_ios_rounded,
+                                  size: 9, color: AppColors.emerald),
+                            ],
+                          ),
                         ],
                       ),
                     ],
                   ),
                 ),
               );
-            }).toList(),
+            }),
         ],
       ),
     );

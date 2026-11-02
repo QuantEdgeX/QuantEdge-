@@ -74,7 +74,6 @@ class _EnrichmentQuizScreenState extends State<EnrichmentQuizScreen>
   @override
   Widget build(BuildContext context) {
     final isDark = context.watch<QuizProvider>().isDarkMode;
-    final textColor = isDark ? Colors.white : AppColors.lightTextPrimary;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
@@ -122,10 +121,12 @@ class _EnrichmentQuizScreenState extends State<EnrichmentQuizScreen>
 
           // ── Question cards ────────────────────────────────────────────
           Expanded(
-            child: PageView(
-              controller: _pageCtrl,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
+            child: FadeTransition(
+              opacity: _fadeAnim,
+              child: PageView(
+                controller: _pageCtrl,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
                 _QuestionCard(
                   isDark: isDark,
                   icon: Icons.trending_up_rounded,
@@ -183,7 +184,8 @@ class _EnrichmentQuizScreenState extends State<EnrichmentQuizScreen>
               ],
             ),
           ),
-          const SizedBox(height: 16),
+        ),
+        const SizedBox(height: 16),
 
           // ── Continue button ───────────────────────────────────────────
           ElevatedButton(
