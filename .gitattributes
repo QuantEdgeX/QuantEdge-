@@ -1,0 +1,4 @@
+# Enforce LF for LightGBM model text files so C++ parser does not fail on Windows CRLF
+*.txt text eol=lf
+src/ml/saved_models/** text eol=lf
+
