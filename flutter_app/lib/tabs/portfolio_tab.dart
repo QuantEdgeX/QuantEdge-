@@ -144,28 +144,46 @@ class PortfolioTab extends StatelessWidget {
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: isDark ? AppColors.darkSurface : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: isDark ? Colors.white12 : AppColors.lightBorder,
-                    width: 2,
+              Row(
+                children: [
+                  ElevatedButton.icon(
+                    onPressed: () => _showAddPracticeTickerModal(context, quizProvider, isDark),
+                    icon: const Icon(Icons.add_rounded, size: 14),
+                    label: const Text('Add Ticker', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.emerald,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: Size.zero,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
                   ),
-                ),
-                child: Text(
-                  'LEVEL: $userLevel',
-                  style: const TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w900,
-                    color: AppColors.emerald,
-                    letterSpacing: 1.0,
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: isDark ? AppColors.darkSurface : Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: isDark ? Colors.white12 : AppColors.lightBorder,
+                        width: 2,
+                      ),
+                    ),
+                    child: Text(
+                      'LEVEL: $userLevel',
+                      style: const TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.emerald,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
           ),
@@ -178,16 +196,51 @@ class PortfolioTab extends StatelessWidget {
               ),
             )
           else if (holdings.isEmpty)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40),
-                child: Text(
-                  'Your practice portfolio is empty. Add stocks from your watchlist to start learning!',
-                  style: TextStyle(
-                    color:
-                        isDark ? Colors.white60 : AppColors.lightTextSecondary,
-                  ),
+            Container(
+              margin: const EdgeInsets.symmetric(vertical: 24),
+              padding: const EdgeInsets.all(28),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurface.withOpacity(0.5) : Colors.white,
+                borderRadius: BorderRadius.circular(28),
+                border: Border.all(
+                  color: isDark ? Colors.white12 : AppColors.lightBorder,
+                  width: 2,
                 ),
+              ),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.account_balance_wallet_outlined,
+                    size: 48,
+                    color: isDark ? Colors.white24 : AppColors.lightTextMuted,
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    'Your practice portfolio is empty.\nAdd stocks from your watchlist to start paper trading!',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: isDark ? Colors.white60 : AppColors.lightTextSecondary,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton.icon(
+                    onPressed: () => _showAddPracticeTickerModal(context, quizProvider, isDark),
+                    icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                    label: const Text(
+                      '+ Add Ticker to Practice',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.emerald,
+                      foregroundColor: Colors.white,
+                      elevation: 2,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                  ),
+                ],
               ),
             )
           else
@@ -334,14 +387,58 @@ class PortfolioTab extends StatelessWidget {
                                   color: textColor,
                                 ),
                               ),
-                              Text(
-                                holding.allocation,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isDark
-                                      ? Colors.white60
-                                      : AppColors.lightTextSecondary,
-                                ),
+                              Row(
+                                children: [
+                                  Text(
+                                    holding.allocation,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isDark
+                                          ? Colors.white60
+                                          : AppColors.lightTextSecondary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  IconButton(
+                                    icon: Icon(
+                                      Icons.delete_outline_rounded,
+                                      size: 16,
+                                      color: isDark ? Colors.white38 : AppColors.lightTextMuted,
+                                    ),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Remove Position',
+                                    onPressed: () async {
+                                      final confirm = await showDialog<bool>(
+                                        context: context,
+                                        builder: (ctx) => AlertDialog(
+                                          backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+                                          title: Text('Remove ${holding.symbol}?',
+                                              style: TextStyle(color: textColor, fontSize: 16, fontWeight: FontWeight.w800)),
+                                          content: Text(
+                                              'Remove ${holding.symbol} from your simulated practice portfolio?',
+                                              style: TextStyle(
+                                                  color: isDark ? Colors.white70 : AppColors.lightTextSecondary,
+                                                  fontSize: 13)),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx, false),
+                                              child: const Text('CANCEL'),
+                                            ),
+                                            TextButton(
+                                              onPressed: () => Navigator.pop(ctx, true),
+                                              child: const Text('REMOVE',
+                                                  style: TextStyle(color: AppColors.rose, fontWeight: FontWeight.w900)),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                      if (confirm == true) {
+                                        await quizProvider.removePortfolioHolding(holding.symbol);
+                                      }
+                                    },
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -363,13 +460,36 @@ class PortfolioTab extends StatelessWidget {
                                       : AppColors.lightTextSecondary,
                                 ),
                               ),
-                              Text(
-                                holding.quantity.toStringAsFixed(2),
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: textColor,
-                                ),
+                              const SizedBox(height: 2),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: const Icon(Icons.remove_circle_outline_rounded, size: 16),
+                                    color: AppColors.rose,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Sell 1 share',
+                                    onPressed: () => quizProvider.adjustHoldingShares(holding.symbol, -1.0),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    holding.quantity.toStringAsFixed(2),
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: textColor,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  IconButton(
+                                    icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
+                                    color: AppColors.emerald,
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(),
+                                    tooltip: 'Buy 1 share',
+                                    onPressed: () => quizProvider.adjustHoldingShares(holding.symbol, 1.0),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -451,6 +571,229 @@ class PortfolioTab extends StatelessWidget {
             }),
         ],
       ),
+    );
+  }
+
+  void _showAddPracticeTickerModal(
+    BuildContext context,
+    QuizProvider quizProvider,
+    bool isDark,
+  ) {
+    String selectedTicker = quizProvider.selectedTickers.isNotEmpty
+        ? quizProvider.selectedTickers.first
+        : 'NVDA';
+    double shares = 5.0;
+    final sharesCtrl = TextEditingController(text: '5.0');
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            final textColor =
+                isDark ? Colors.white : AppColors.lightTextPrimary;
+            final secondaryColor =
+                isDark ? Colors.white60 : AppColors.lightTextSecondary;
+            final borderColor =
+                isDark ? Colors.white12 : AppColors.lightBorder;
+            final availableTickers = <String>{
+              ...quizProvider.selectedTickers,
+              'NVDA',
+              'AAPL',
+              'TSLA',
+              'MSFT',
+              'AMD',
+              'AMZN',
+            }.toList();
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 20,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'ADD PRACTICE HOLDING',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                      color: AppColors.emerald,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Simulate a Stock Position',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      color: textColor,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Ticker selection chips
+                  Text(
+                    'Select Stock Ticker',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: secondaryColor),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: availableTickers.map((t) {
+                      final isSel = t == selectedTicker;
+                      return ChoiceChip(
+                        label: Text(t),
+                        selected: isSel,
+                        onSelected: (val) {
+                          if (val) {
+                            setModalState(() => selectedTicker = t);
+                          }
+                        },
+                        selectedColor: AppColors.emerald,
+                        labelStyle: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: isSel ? Colors.white : textColor,
+                        ),
+                        backgroundColor: isDark
+                            ? Colors.white10
+                            : Colors.black.withOpacity(0.04),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Shares input
+                  Text(
+                    'Number of Shares',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: secondaryColor),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: sharesCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: textColor),
+                          decoration: InputDecoration(
+                            hintText: 'Enter quantity (e.g. 10)',
+                            filled: true,
+                            fillColor: isDark
+                                ? Colors.white.withOpacity(0.05)
+                                : Colors.black.withOpacity(0.03),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                          ),
+                          onChanged: (val) {
+                            final parsed = double.tryParse(val) ?? 1.0;
+                            setModalState(() => shares = parsed);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ...[1, 5, 10, 25].map((preset) => Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: ActionChip(
+                              label: Text('+$preset',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700)),
+                              onPressed: () {
+                                final current =
+                                    double.tryParse(sharesCtrl.text) ?? 0.0;
+                                final next = current + preset;
+                                sharesCtrl.text = next.toStringAsFixed(1);
+                                setModalState(() => shares = next);
+                              },
+                              backgroundColor: isDark
+                                  ? Colors.white10
+                                  : Colors.black.withOpacity(0.04),
+                            ),
+                          )),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // Add button
+                  ElevatedButton(
+                    onPressed: shares > 0
+                        ? () async {
+                            Navigator.pop(ctx);
+                            final ok = await quizProvider.addPortfolioHolding(
+                              ticker: selectedTicker,
+                              shares: shares,
+                            );
+                            if (ok && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Added ${shares.toStringAsFixed(1)} shares of $selectedTicker to Simulated Practice Portfolio'),
+                                  backgroundColor: AppColors.emerald,
+                                ),
+                              );
+                            }
+                          }
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.emerald,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      'ADD $selectedTicker TO PRACTICE',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -10,8 +10,24 @@ import '../screens/ticker_detail_screen.dart';
 import '../theme/app_theme.dart';
 import '../widgets/xai_explanation_sheet.dart';
 
-class DashboardTab extends StatelessWidget {
+class DashboardTab extends StatefulWidget {
   const DashboardTab({super.key});
+
+  @override
+  State<DashboardTab> createState() => _DashboardTabState();
+}
+
+class _DashboardTabState extends State<DashboardTab> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  bool _isSearchActive = false;
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
 
   // Same ladder as the backend's SCORE_NAMES (score 1-10).
   static const Map<int, String> _scoreNames = {
@@ -112,6 +128,232 @@ class DashboardTab extends StatelessWidget {
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(20, 10, 20, 110),
         children: [
+          // ── Search bar ──────────────────────────────────────────────────
+          Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: isDark ? AppColors.darkCard.withOpacity(0.5) : Colors.white,
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(
+                color: isDark ? Colors.white12 : AppColors.lightBorder,
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isDark ? 0.3 : 0.04),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: TextField(
+              controller: _searchCtrl,
+              focusNode: _searchFocusNode,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: textColor,
+              ),
+              textCapitalization: TextCapitalization.characters,
+              onChanged: (val) {
+                final query = val.trim();
+                setState(() {
+                  _isSearchActive = query.isNotEmpty;
+                });
+                quizProvider.searchTickers(query);
+              },
+              decoration: InputDecoration(
+                hintText: 'Search stock ticker (e.g. NVDA, AAPL, MSFT)...',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  color: isDark ? Colors.white30 : AppColors.lightTextMuted,
+                ),
+                prefixIcon: const Icon(
+                  Icons.search_rounded,
+                  size: 20,
+                  color: AppColors.emerald,
+                ),
+                suffixIcon: _searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        color: isDark ? Colors.white54 : AppColors.lightTextMuted,
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          _searchFocusNode.unfocus();
+                          setState(() {
+                            _isSearchActive = false;
+                          });
+                          quizProvider.searchTickers('');
+                        },
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              ),
+            ),
+          ),
+
+          // ── Floating Live Search Results Overlay ───────────────────────
+          if (_isSearchActive) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? AppColors.darkSurface : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppColors.emerald.withOpacity(0.4),
+                  width: 1.5,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.4 : 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: quizProvider.isSearchingTickers
+                  ? const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.emerald,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    )
+                  : (quizProvider.tickerSearchResults.isEmpty
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          child: Center(
+                            child: Text(
+                              'No matching tickers found for "${_searchCtrl.text}"',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isDark ? Colors.white54 : AppColors.lightTextSecondary,
+                              ),
+                            ),
+                          ),
+                        )
+                      : Column(
+                          children: quizProvider.tickerSearchResults.map((res) {
+                            final isPos = res.changePercent >= 0;
+                            final sigColor = res.signal == 'BUY'
+                                ? AppColors.emerald
+                                : (res.signal == 'SELL' ? AppColors.rose : AppColors.amber);
+                            return InkWell(
+                              onTap: () {
+                                final sym = res.ticker;
+                                _searchCtrl.clear();
+                                _searchFocusNode.unfocus();
+                                setState(() {
+                                  _isSearchActive = false;
+                                });
+                                quizProvider.searchTickers('');
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => TickerDetailScreen(ticker: sym),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(14),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      color: isDark ? Colors.white10 : AppColors.lightBorder,
+                                      width: 0.8,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Text(
+                                                res.ticker,
+                                                style: TextStyle(
+                                                  fontSize: 14,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: textColor,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: sigColor.withOpacity(0.12),
+                                                  borderRadius: BorderRadius.circular(6),
+                                                  border: Border.all(color: sigColor.withOpacity(0.3)),
+                                                ),
+                                                child: Text(
+                                                  res.signal,
+                                                  style: TextStyle(
+                                                    fontSize: 9,
+                                                    fontWeight: FontWeight.w900,
+                                                    color: sigColor,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            res.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
+                                              fontSize: 11,
+                                              color: secondaryColor,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          res.price > 0 ? '\$${res.price.toStringAsFixed(2)}' : '—',
+                                          style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w800,
+                                            color: textColor,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          '${isPos ? '+' : ''}${res.changePercent.toStringAsFixed(2)}%',
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            color: isPos ? AppColors.emerald : AppColors.rose,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Icon(
+                                      Icons.arrow_forward_ios_rounded,
+                                      size: 12,
+                                      color: isDark ? Colors.white30 : AppColors.lightTextMuted,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        )),
+            ),
+          ],
+
           // ── Header ──────────────────────────────────────────────────────
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

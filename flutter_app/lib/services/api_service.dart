@@ -113,6 +113,50 @@ class ApiService {
     return [];
   }
 
+  Future<bool> addPortfolioHolding({
+    required String ticker,
+    required double shares,
+    String? userId,
+    double? avgPrice,
+    String mode = 'add',
+  }) async {
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/api/portfolio/holdings'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({
+              'userId': userId ?? 'default_user',
+              'ticker': ticker,
+              'shares': shares,
+              if (avgPrice != null) 'avgPrice': avgPrice,
+              'mode': mode,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> removePortfolioHolding({
+    required String ticker,
+    String? userId,
+  }) async {
+    try {
+      final query = (userId != null && userId.isNotEmpty)
+          ? '?userId=${Uri.encodeComponent(userId)}'
+          : '';
+      final response = await http
+          .delete(Uri.parse('$baseUrl/api/portfolio/holdings/$ticker$query'))
+          .timeout(const Duration(seconds: 8));
+      return response.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static final List<MarketAsset> _fallbackAssets = [
     MarketAsset(
       ticker: 'NVDA',

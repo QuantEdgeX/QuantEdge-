@@ -5,7 +5,8 @@ import '../theme/app_theme.dart';
 import 'ticker_detail_screen.dart';
 
 class TickerSelectionScreen extends StatefulWidget {
-  const TickerSelectionScreen({super.key});
+  final bool isEditingWorkspace;
+  const TickerSelectionScreen({super.key, this.isEditingWorkspace = false});
 
   @override
   State<TickerSelectionScreen> createState() => _TickerSelectionScreenState();
@@ -26,21 +27,23 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
     final results = provider.tickerSearchResults;
     final isSearching = provider.isSearchingTickers;
     final isSearchMode = _searchCtrl.text.trim().isNotEmpty;
+    final canPop = Navigator.canPop(context);
+    final isEditing = widget.isEditingWorkspace || canPop || provider.phase == AppPhase.mainApp;
 
-    return Padding(
+    final bodyContent = Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Header ────────────────────────────────────────────────────
-          Text('PERSONALISE YOUR FEED',
+          Text(isEditing ? 'CUSTOMISE WATCHLIST' : 'PERSONALISE YOUR FEED',
             style: TextStyle(
               fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 2.0,
               color: isDark ? Colors.white38 : AppColors.lightTextMuted,
             ),
           ),
           const SizedBox(height: 4),
-          Text('Pick 3 Tickers to Follow',
+          Text(isEditing ? 'Manage Your Feed Tickers' : 'Pick 3 Tickers to Follow',
             style: TextStyle(
               fontSize: 22, fontWeight: FontWeight.w900,
               fontStyle: FontStyle.italic, color: textColor,
@@ -109,14 +112,17 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
                   ),
                 ),
                 Expanded(
-                  child: Row(
-                    children: selected.map((t) => _SelectedChip(
-                      ticker: t, isDark: isDark,
-                      onRemove: () => provider.toggleTickerSelection(t),
-                    )).toList(),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: selected.map((t) => _SelectedChip(
+                        ticker: t, isDark: isDark,
+                        onRemove: () => provider.toggleTickerSelection(t, allowUnlimited: isEditing),
+                      )).toList(),
+                    ),
                   ),
                 ),
-                Text('${selected.length}/3',
+                Text(isEditing ? '${selected.length} active' : '${selected.length}/3',
                   style: const TextStyle(
                     fontSize: 11, fontWeight: FontWeight.w900,
                     color: AppColors.emerald,
@@ -164,18 +170,18 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
                             price: r.price > 0 ? '\$${r.price.toStringAsFixed(2)}' : '—',
                             change: r.changePercent,
                             isSelected: provider.isTickerSelected(r.ticker),
-                            canSelect: selected.length < 3 || provider.isTickerSelected(r.ticker),
+                            canSelect: isEditing || selected.length < 3 || provider.isTickerSelected(r.ticker),
                             isDark: isDark,
-                            onTap: () => provider.toggleTickerSelection(r.ticker),
+                            onTap: () => provider.toggleTickerSelection(r.ticker, allowUnlimited: isEditing),
                           )) : provider.popularTickers.map((t) => _SearchResultTile(
                             ticker: t['ticker']!,
                             name: t['name']!,
                             price: '—',
                             change: 0,
                             isSelected: provider.isTickerSelected(t['ticker']!),
-                            canSelect: selected.length < 3 || provider.isTickerSelected(t['ticker']!),
+                            canSelect: isEditing || selected.length < 3 || provider.isTickerSelected(t['ticker']!),
                             isDark: isDark,
-                            onTap: () => provider.toggleTickerSelection(t['ticker']!),
+                            onTap: () => provider.toggleTickerSelection(t['ticker']!, allowUnlimited: isEditing),
                           ))),
                         ],
                       ),
@@ -184,37 +190,85 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
 
           // ── Confirm button ─────────────────────────────────────────────
           ElevatedButton(
-            onPressed: selected.length == 3
-                ? () => provider.confirmTickerSelection()
-                : null,
+            onPressed: isEditing
+                ? (selected.isNotEmpty
+                    ? () async {
+                        final navigator = Navigator.of(context);
+                        await provider.confirmTickerSelection();
+                        if (mounted && canPop) {
+                          navigator.pop();
+                        }
+                      }
+                    : null)
+                : (selected.length == 3
+                    ? () => provider.confirmTickerSelection()
+                    : null),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.emerald,
               disabledBackgroundColor: isDark ? Colors.white10 : Colors.black12,
               foregroundColor: Colors.white,
               minimumSize: const Size.fromHeight(56),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              elevation: selected.length == 3 ? 10 : 0,
+              elevation: (isEditing ? selected.isNotEmpty : selected.length == 3) ? 10 : 0,
               shadowColor: AppColors.emerald.withOpacity(0.4),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(
-                  selected.length == 3
-                      ? 'LAUNCH MY WORKSPACE →'
-                      : 'SELECT ${3 - selected.length} MORE',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900, letterSpacing: 1.5, fontSize: 12,
-                    color: selected.length == 3 ? Colors.white
-                        : (isDark ? Colors.white30 : Colors.black38),
+                if (provider.isLaunchingWorkspace)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                  )
+                else
+                  Text(
+                    isEditing
+                        ? (selected.isNotEmpty
+                            ? 'SAVE WATCHLIST (${selected.length})'
+                            : 'SELECT AT LEAST 1 TICKER')
+                        : (selected.length == 3
+                            ? 'LAUNCH MY WORKSPACE →'
+                            : 'SELECT ${3 - selected.length} MORE'),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900, letterSpacing: 1.5, fontSize: 12,
+                      color: (isEditing ? selected.isNotEmpty : selected.length == 3)
+                          ? Colors.white
+                          : (isDark ? Colors.white30 : Colors.black38),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
         ],
       ),
     );
+
+    if (canPop) {
+      return Scaffold(
+        backgroundColor: isDark ? AppColors.darkBg : AppColors.lightBg,
+        appBar: AppBar(
+          backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back_ios_rounded, size: 18, color: textColor),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text(
+            'CUSTOMISE WATCHLIST',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 2.0,
+              color: textColor,
+            ),
+          ),
+        ),
+        body: SafeArea(child: bodyContent),
+      );
+    }
+
+    return bodyContent;
   }
 }
 

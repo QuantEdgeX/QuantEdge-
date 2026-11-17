@@ -1293,6 +1293,14 @@ class AssistantQuery(BaseModel):
     userId: Optional[str] = None
 
 
+class PortfolioHoldingRequest(BaseModel):
+    userId: Optional[str] = "default_user"
+    ticker: str
+    shares: float
+    avgPrice: Optional[float] = None
+    mode: Optional[str] = "add"  # "add" | "set"
+
+
 @app.get("/api/learning/topics")
 async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
     profile = _get_profile(userId) if userId else None
@@ -2105,6 +2113,7 @@ async def search_tickers(q: str = "") -> List[Dict[str, Any]]:
                     "name": data.get("companyName", cname),
                     "price": data.get("currentPrice", 0.0),
                     "changePercent": data.get("changePercent", 0.0),
+                    "signal": data.get("aiSignal", "BUY"),
                     "exchange": "NASDAQ",
                 })
             except Exception as exc:
@@ -2144,8 +2153,8 @@ async def get_dashboard(userId: Optional[str] = None) -> Dict[str, Any]:
     daily_chg = 0.0
 
     for item in holdings_spec:
-        sym = item.get("symbol")
-        qty = float(item.get("quantity", 0))
+        sym = item.get("ticker") or item.get("symbol")
+        qty = float(item.get("shares") if item.get("shares") is not None else item.get("quantity", 0))
         try:
             res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
@@ -2227,8 +2236,11 @@ async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
     equity_total = 0.0
 
     for spec in holdings_spec:
-        sym = spec["symbol"]
-        qty = float(spec.get("quantity", 0))
+        sym = (spec.get("ticker") or spec.get("symbol") or "").upper()
+        if not sym:
+            continue
+        qty = float(spec.get("shares") if spec.get("shares") is not None else spec.get("quantity", 0))
+        avg_p = float(spec.get("avgPrice") if spec.get("avgPrice") is not None else spec.get("avg_price", 0))
         try:
             res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
@@ -2239,12 +2251,16 @@ async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
             equity_total += item_val
 
             items.append({
+                "ticker": sym,
                 "symbol": sym,
-                "name": spec.get("name", sym),
+                "name": spec.get("name") or res.get("companyName") or sym,
+                "shares": qty,
                 "quantity": qty,
                 "current_price": curr,
+                "avg_price": avg_p if avg_p > 0 else curr,
                 "total_value": item_val,
                 "day_change": day_chg,
+                "day_change_percent": pct,
                 "_raw_val": item_val,
             })
         except Exception as exc:
@@ -2261,6 +2277,115 @@ async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
         del item["_raw_val"]
 
     return items
+
+
+@app.post("/api/portfolio/holdings")
+async def add_portfolio_holding(request: PortfolioHoldingRequest) -> Dict[str, Any]:
+    """
+    Add or update a simulated practice holding.
+    Validates ticker with prediction_service, gets current price, and persists in learning_progress.json.
+    """
+    ticker = request.ticker.strip().upper()
+    try:
+        data = await asyncio.to_thread(prediction_service.predict_ticker, ticker)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unable to validate ticker '{ticker}' via prediction pipeline: {exc}",
+        )
+
+    current_price = data.get("currentPrice", 0.0)
+    company_name = data.get("companyName") or COMPANY_NAMES.get(ticker, ticker)
+    avg_price = float(request.avgPrice) if (request.avgPrice is not None and request.avgPrice > 0) else current_price
+
+    profile = _get_profile(request.userId or "default_user")
+    holdings = profile.setdefault("simulated_holdings", [])
+
+    existing_idx = next(
+        (i for i, h in enumerate(holdings) if (h.get("ticker") or h.get("symbol") or "").upper() == ticker),
+        None,
+    )
+
+    mode = (request.mode or "add").lower()
+    new_qty = 0.0
+
+    if existing_idx is not None:
+        existing = holdings[existing_idx]
+        existing_qty = float(existing.get("shares") if existing.get("shares") is not None else existing.get("quantity", 0))
+        existing_avg = float(existing.get("avgPrice") if existing.get("avgPrice") is not None else existing.get("avg_price", current_price))
+
+        if mode == "set":
+            new_qty = float(request.shares)
+            new_avg = avg_price
+        else:  # "add"
+            new_qty = existing_qty + float(request.shares)
+            if new_qty > 0 and (existing_qty * existing_avg + float(request.shares) * avg_price) > 0:
+                new_avg = round((existing_qty * existing_avg + float(request.shares) * avg_price) / new_qty, 2)
+            else:
+                new_avg = current_price
+
+        if new_qty <= 0:
+            holdings.pop(existing_idx)
+        else:
+            holdings[existing_idx] = {
+                "ticker": ticker,
+                "symbol": ticker,
+                "shares": round(new_qty, 4),
+                "quantity": round(new_qty, 4),
+                "avgPrice": round(new_avg, 2),
+                "avg_price": round(new_avg, 2),
+                "name": company_name,
+            }
+    else:
+        new_qty = float(request.shares)
+        if new_qty > 0:
+            holdings.append({
+                "ticker": ticker,
+                "symbol": ticker,
+                "shares": round(new_qty, 4),
+                "quantity": round(new_qty, 4),
+                "avgPrice": round(avg_price, 2),
+                "avg_price": round(avg_price, 2),
+                "name": company_name,
+            })
+
+    _save_progress(_PROGRESS_STORE)
+
+    updated_items = await get_portfolio(userId=request.userId)
+    total_val = sum(item.get("total_value", 0.0) for item in updated_items)
+
+    return {
+        "success": True,
+        "ticker": ticker,
+        "shares": new_qty if new_qty > 0 else 0.0,
+        "holdings": updated_items,
+        "portfolio_value": round(total_val, 2),
+    }
+
+
+@app.delete("/api/portfolio/holdings/{ticker}")
+async def delete_portfolio_holding(ticker: str, userId: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Remove a ticker from simulated practice holdings.
+    """
+    sym = ticker.strip().upper()
+    profile = _get_profile(userId or "default_user")
+    holdings = profile.get("simulated_holdings", [])
+
+    profile["simulated_holdings"] = [
+        h for h in holdings if (h.get("ticker") or h.get("symbol") or "").upper() != sym
+    ]
+    _save_progress(_PROGRESS_STORE)
+
+    updated_items = await get_portfolio(userId=userId)
+    total_val = sum(item.get("total_value", 0.0) for item in updated_items)
+
+    return {
+        "success": True,
+        "ticker": sym,
+        "holdings": updated_items,
+        "portfolio_value": round(total_val, 2),
+    }
 
 
 # ============================================================================

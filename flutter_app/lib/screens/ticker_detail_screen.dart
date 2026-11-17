@@ -32,7 +32,9 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
     _fadeCtrl = AnimationController(
       duration: const Duration(milliseconds: 500), vsync: this);
     _fadeAnim = CurvedAnimation(parent: _fadeCtrl, curve: Curves.easeOut);
-    _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _load();
+    });
   }
 
   @override
@@ -395,6 +397,29 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
         ),
         const SizedBox(height: 14),
 
+        // ── Practice Buy / Add to Portfolio Action Button ──────────
+        ElevatedButton.icon(
+          onPressed: () => _showPracticeBuySheet(context, d, isDark),
+          icon: const Icon(Icons.add_chart_rounded, size: 18),
+          label: const Text(
+            'PRACTICE BUY / ADD TO PORTFOLIO',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1.2,
+            ),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.emerald,
+            foregroundColor: Colors.white,
+            minimumSize: const Size.fromHeight(50),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            elevation: 4,
+            shadowColor: AppColors.emerald.withOpacity(0.35),
+          ),
+        ),
+        const SizedBox(height: 14),
+
         // ── Factor Impact Distribution ────────────────────────────────
         _FactorImpactCard(factors: _detail!.factors, isDark: isDark,
           textColor: textColor, borderColor: borderColor, cardColor: cardColor),
@@ -449,6 +474,221 @@ class _TickerDetailScreenState extends State<TickerDetailScreen>
     if (v >= 1e12) return '\$${(v / 1e12).toStringAsFixed(2)}T';
     if (v >= 1e9)  return '\$${(v / 1e9).toStringAsFixed(1)}B';
     return '\$${v.toStringAsFixed(0)}';
+  }
+
+  void _showPracticeBuySheet(BuildContext context, TickerDetail d, bool isDark) {
+    double shares = 5.0;
+    final sharesCtrl = TextEditingController(text: '5.0');
+    final quizProvider = context.read<QuizProvider>();
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: isDark ? AppColors.darkSurface : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            final textColor =
+                isDark ? Colors.white : AppColors.lightTextPrimary;
+            final secondaryColor =
+                isDark ? Colors.white60 : AppColors.lightTextSecondary;
+            final borderColor =
+                isDark ? Colors.white12 : AppColors.lightBorder;
+            final estCost = shares * d.currentPrice;
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 20,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom + 24,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: isDark ? Colors.white24 : Colors.black12,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'SIMULATED PRACTICE TRADE',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.5,
+                              color: AppColors.emerald,
+                            ),
+                          ),
+                          Text(
+                            'Buy ${widget.ticker}',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              color: textColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                      _SignalBadge(signal: d.aiSignal, color: d.signalColor),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? Colors.white.withOpacity(0.04)
+                          : Colors.black.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Current Live Price:',
+                            style: TextStyle(
+                                fontSize: 12, color: secondaryColor)),
+                        Text('\$${d.currentPrice.toStringAsFixed(2)}',
+                            style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w800,
+                                color: textColor)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('Number of Shares',
+                      style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: secondaryColor)),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: sharesCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true),
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: textColor),
+                          decoration: InputDecoration(
+                            hintText: 'Shares',
+                            filled: true,
+                            fillColor: isDark
+                                ? Colors.white.withOpacity(0.05)
+                                : Colors.black.withOpacity(0.03),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              borderSide: BorderSide(color: borderColor),
+                            ),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16, vertical: 12),
+                          ),
+                          onChanged: (val) {
+                            final parsed = double.tryParse(val) ?? 1.0;
+                            setModalState(() => shares = parsed);
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ...[1, 5, 10, 25].map((preset) => Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: ActionChip(
+                              label: Text('+$preset',
+                                  style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700)),
+                              onPressed: () {
+                                final current =
+                                    double.tryParse(sharesCtrl.text) ?? 0.0;
+                                final next = current + preset;
+                                sharesCtrl.text = next.toStringAsFixed(1);
+                                setModalState(() => shares = next);
+                              },
+                              backgroundColor: isDark
+                                  ? Colors.white10
+                                  : Colors.black.withOpacity(0.04),
+                            ),
+                          )),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Estimated Total Value:',
+                          style: TextStyle(
+                              fontSize: 12, color: secondaryColor)),
+                      Text('\$${estCost.toStringAsFixed(2)}',
+                          style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w900,
+                              color: AppColors.emerald)),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  ElevatedButton(
+                    onPressed: shares > 0
+                        ? () async {
+                            Navigator.pop(ctx);
+                            final ok = await quizProvider.addPortfolioHolding(
+                              ticker: widget.ticker,
+                              shares: shares,
+                            );
+                            if (ok && context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                      'Added ${shares.toStringAsFixed(1)} shares of ${widget.ticker} to Simulated Practice Portfolio'),
+                                  backgroundColor: AppColors.emerald,
+                                ),
+                              );
+                            }
+                          }
+                        : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.emerald,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(52),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16)),
+                      elevation: 0,
+                    ),
+                    child: Text(
+                      'CONFIRM PRACTICE BUY (${shares.toStringAsFixed(1)} SHARES)',
+                      style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.2),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 }
 

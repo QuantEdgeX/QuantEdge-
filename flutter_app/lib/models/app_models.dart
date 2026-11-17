@@ -157,6 +157,7 @@ class PortfolioHolding {
   final double dayChange;
   final double dayChangePercent;
   final String allocation;
+  final double avgPrice;
 
   PortfolioHolding({
     required this.symbol,
@@ -167,20 +168,28 @@ class PortfolioHolding {
     required this.dayChange,
     required this.dayChangePercent,
     required this.allocation,
+    this.avgPrice = 0.0,
   });
 
   factory PortfolioHolding.fromJson(Map<String, dynamic> json) {
     final value = (json['total_value'] as num?)?.toDouble() ?? 0.0;
     final change = (json['day_change'] as num?)?.toDouble() ?? 0.0;
+    final qty = (json['shares'] as num?)?.toDouble() ??
+        (json['quantity'] as num?)?.toDouble() ??
+        0.0;
+    final avgP = (json['avg_price'] as num?)?.toDouble() ??
+        (json['avgPrice'] as num?)?.toDouble() ??
+        0.0;
     return PortfolioHolding(
-      symbol: json['symbol'] as String? ?? 'N/A',
+      symbol: (json['symbol'] as String?) ?? (json['ticker'] as String?) ?? 'N/A',
       name: json['name'] as String? ?? 'Unknown',
-      quantity: (json['quantity'] as num?)?.toDouble() ?? 0.0,
+      quantity: qty,
       currentPrice: (json['current_price'] as num?)?.toDouble() ?? 0.0,
       totalValue: value,
       dayChange: change,
       dayChangePercent: value > 0 ? (change / value * 100) : 0.0,
       allocation: json['allocation'] as String? ?? '0%',
+      avgPrice: avgP,
     );
   }
 
@@ -250,6 +259,7 @@ class TickerSearchResult {
   final double price;
   final double changePercent;
   final String exchange;
+  final String signal;
 
   const TickerSearchResult({
     required this.ticker,
@@ -257,6 +267,7 @@ class TickerSearchResult {
     required this.price,
     required this.changePercent,
     required this.exchange,
+    this.signal = 'BUY',
   });
 
   factory TickerSearchResult.fromJson(Map<String, dynamic> json) {
@@ -266,6 +277,7 @@ class TickerSearchResult {
       price: (json['price'] as num?)?.toDouble() ?? 0.0,
       changePercent: (json['changePercent'] as num?)?.toDouble() ?? 0.0,
       exchange: json['exchange'] as String? ?? '',
+      signal: (json['signal'] as String?)?.toUpperCase() ?? 'BUY',
     );
   }
 

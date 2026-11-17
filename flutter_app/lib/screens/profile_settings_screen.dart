@@ -386,7 +386,7 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const TickerSelectionScreen()),
+                    MaterialPageRoute(builder: (_) => const TickerSelectionScreen(isEditingWorkspace: true)),
                   );
                 },
                 child: const Text(

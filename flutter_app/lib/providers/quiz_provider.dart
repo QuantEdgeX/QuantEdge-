@@ -50,7 +50,7 @@ class QuizProvider extends ChangeNotifier {
         'chosenTickers': _userProfile.chosenTickers,
         'level': _userLevel,
         'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      }, SetOptions(merge: true)).timeout(const Duration(seconds: 2));
     } catch (e) {
       debugPrint('Firebase sync failed: $e');
     }
@@ -94,6 +94,7 @@ class QuizProvider extends ChangeNotifier {
   List<String> _selectedTickers = [];
   List<TickerSearchResult> _tickerSearchResults = [];
   bool _isSearchingTickers = false;
+  bool _isLaunchingWorkspace = false;
   Timer? _searchDebounce;
   final Map<String, TickerDetail> _tickerDetailCache = {};
   bool _isLoadingTickerDetail = false;
@@ -238,6 +239,7 @@ class QuizProvider extends ChangeNotifier {
   List<String> get selectedTickers => _selectedTickers;
   List<TickerSearchResult> get tickerSearchResults => _tickerSearchResults;
   bool get isSearchingTickers => _isSearchingTickers;
+  bool get isLaunchingWorkspace => _isLaunchingWorkspace;
   bool get isLoadingTickerDetail => _isLoadingTickerDetail;
   Map<String, TickerDetail> get tickerDetailCache => _tickerDetailCache;
   List<Map<String, String>> get popularTickers => _popularTickers;
@@ -936,10 +938,10 @@ class QuizProvider extends ChangeNotifier {
 
   // ─── Ticker Selection ────────────────────────────────────────────────────
 
-  void toggleTickerSelection(String ticker) {
+  void toggleTickerSelection(String ticker, {bool allowUnlimited = false}) {
     if (_selectedTickers.contains(ticker)) {
       _selectedTickers = _selectedTickers.where((t) => t != ticker).toList();
-    } else if (_selectedTickers.length < 3) {
+    } else if (allowUnlimited || _phase == AppPhase.mainApp || _selectedTickers.length < 3) {
       _selectedTickers = [..._selectedTickers, ticker];
     }
     notifyListeners();
@@ -947,11 +949,66 @@ class QuizProvider extends ChangeNotifier {
 
   bool isTickerSelected(String ticker) => _selectedTickers.contains(ticker);
 
+  Future<void> launchWorkspace() async {
+    await confirmTickerSelection();
+  }
+
   Future<void> confirmTickerSelection() async {
     if (_selectedTickers.isEmpty) return;
-    _userProfile = _userProfile.copyWith(chosenTickers: _selectedTickers);
-    _syncToFirebase();
-    setPhase(AppPhase.mainApp);
+    _isLaunchingWorkspace = true;
+    notifyListeners();
+    try {
+      _userProfile = _userProfile.copyWith(chosenTickers: _selectedTickers);
+      await _syncToFirebase();
+      setPhase(AppPhase.mainApp);
+    } catch (e) {
+      debugPrint('Error confirming ticker selection: $e');
+    } finally {
+      _isLaunchingWorkspace = false;
+      notifyListeners();
+    }
+  }
+
+  // ─── Practice Portfolio Operations ────────────────────────────────────────
+
+  Future<bool> addPortfolioHolding({
+    required String ticker,
+    required double shares,
+    double? avgPrice,
+    String mode = 'add',
+  }) async {
+    final success = await _apiService.addPortfolioHolding(
+      ticker: ticker,
+      shares: shares,
+      userId: userId,
+      avgPrice: avgPrice,
+      mode: mode,
+    );
+    if (success) {
+      await refreshPortfolioData();
+      await refreshDashboardMetrics();
+    }
+    return success;
+  }
+
+  Future<bool> removePortfolioHolding(String ticker) async {
+    final success = await _apiService.removePortfolioHolding(
+      ticker: ticker,
+      userId: userId,
+    );
+    if (success) {
+      await refreshPortfolioData();
+      await refreshDashboardMetrics();
+    }
+    return success;
+  }
+
+  Future<bool> adjustHoldingShares(String ticker, double deltaShares) async {
+    return addPortfolioHolding(
+      ticker: ticker,
+      shares: deltaShares,
+      mode: 'add',
+    );
   }
 
   void searchTickers(String query) {
