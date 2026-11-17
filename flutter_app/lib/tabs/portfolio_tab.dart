@@ -121,48 +121,56 @@ class PortfolioTab extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'SIMULATED PRACTICE PORTFOLIO',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 2.0,
-                      color: isDark ? Colors.white54 : AppColors.lightTextMuted,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SIMULATED PRACTICE PORTFOLIO',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1.5,
+                        color: isDark ? Colors.white54 : AppColors.lightTextMuted,
+                      ),
                     ),
-                  ),
-                  Text(
-                    'Practice Holdings',
-                    style: TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      fontStyle: FontStyle.italic,
-                      color: textColor,
+                    Text(
+                      'Practice Holdings',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        fontStyle: FontStyle.italic,
+                        color: textColor,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              const SizedBox(width: 8),
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   ElevatedButton.icon(
                     onPressed: () => _showAddPracticeTickerModal(context, quizProvider, isDark),
-                    icon: const Icon(Icons.add_rounded, size: 14),
+                    icon: const Icon(Icons.add_rounded, size: 13),
                     label: const Text('Add Ticker', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.emerald,
                       foregroundColor: Colors.white,
                       elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       minimumSize: Size.zero,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
+                      horizontal: 8,
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
@@ -170,7 +178,7 @@ class PortfolioTab extends StatelessWidget {
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: isDark ? Colors.white12 : AppColors.lightBorder,
-                        width: 2,
+                        width: 1.5,
                       ),
                     ),
                     child: Text(
@@ -179,7 +187,7 @@ class PortfolioTab extends StatelessWidget {
                         fontSize: 9,
                         fontWeight: FontWeight.w900,
                         color: AppColors.emerald,
-                        letterSpacing: 1.0,
+                        letterSpacing: 0.8,
                       ),
                     ),
                   ),
