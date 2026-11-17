@@ -1,0 +1,379 @@
+{
+    "best_params": {
+        "random_strength": 2.0,
+        "learning_rate": 0.02,
+        "l2_leaf_reg": 5.0,
+        "iterations": 300,
+        "depth": 5,
+        "bagging_temperature": 1.0
+    },
+    "best_validation_metrics": {
+        "accuracy": 0.5357042845141416,
+        "balanced_accuracy": 0.53709912989142,
+        "macro_f1": 0.5136156320751307,
+        "log_loss": 0.6880489802201047,
+        "roc_auc": 0.5719666812845411
+    },
+    "all_trials": [
+        {
+            "trial": 1,
+            "model": "CatBoost",
+            "selection_score": 0.553550747550565,
+            "accuracy": 0.5410249229907589,
+            "balanced_accuracy": 0.5420430141931404,
+            "macro_f1": 0.5297894642042712,
+            "log_loss": 0.6910071194020112,
+            "roc_auc": 0.5584826332751756,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.05,
+                "l2_leaf_reg": 3.0,
+                "iterations": 300,
+                "depth": 7,
+                "bagging_temperature": 0.0
+            }
+        },
+        {
+            "trial": 2,
+            "model": "CatBoost",
+            "selection_score": 0.5588611295664389,
+            "accuracy": 0.5396247549705965,
+            "balanced_accuracy": 0.5406373769636102,
+            "macro_f1": 0.5284801423862548,
+            "log_loss": 0.6897948275690045,
+            "roc_auc": 0.5666713092533654,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.05,
+                "l2_leaf_reg": 10.0,
+                "iterations": 500,
+                "depth": 8,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 3,
+            "model": "CatBoost",
+            "selection_score": 0.5534795559930461,
+            "accuracy": 0.5385046205544666,
+            "balanced_accuracy": 0.5396867445993856,
+            "macro_f1": 0.5230405543841631,
+            "log_loss": 0.6908851288397757,
+            "roc_auc": 0.5593907608760436,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 3.0,
+                "iterations": 200,
+                "depth": 6,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 4,
+            "model": "CatBoost",
+            "selection_score": 0.5593675793113788,
+            "accuracy": 0.5348641837020442,
+            "balanced_accuracy": 0.5362680127658587,
+            "macro_f1": 0.5124297540090512,
+            "log_loss": 0.6888131092562999,
+            "roc_auc": 0.5692673935451733,
+            "params": {
+                "random_strength": 1.0,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 3.0,
+                "iterations": 700,
+                "depth": 5,
+                "bagging_temperature": 0.0
+            }
+        },
+        {
+            "trial": 5,
+            "model": "CatBoost",
+            "selection_score": 0.553260021242971,
+            "accuracy": 0.5320638476617194,
+            "balanced_accuracy": 0.5334892050448605,
+            "macro_f1": 0.5087461616298079,
+            "log_loss": 0.6897060144035274,
+            "roc_auc": 0.5617332281850184,
+            "params": {
+                "random_strength": 1.0,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 1.0,
+                "iterations": 300,
+                "depth": 6,
+                "bagging_temperature": 2.0
+            }
+        },
+        {
+            "trial": 6,
+            "model": "CatBoost",
+            "selection_score": 0.5581249502019838,
+            "accuracy": 0.5357042845141416,
+            "balanced_accuracy": 0.5369512258624702,
+            "macro_f1": 0.518288341062566,
+            "log_loss": 0.6902627832011317,
+            "roc_auc": 0.5671994034903468,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 10.0,
+                "iterations": 300,
+                "depth": 7,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 7,
+            "model": "CatBoost",
+            "selection_score": 0.5574603074521672,
+            "accuracy": 0.5281433772052646,
+            "balanced_accuracy": 0.5294639569017384,
+            "macro_f1": 0.508148473541115,
+            "log_loss": 0.6883875203493955,
+            "roc_auc": 0.569458743402351,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 5.0,
+                "iterations": 300,
+                "depth": 6,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 8,
+            "model": "CatBoost",
+            "selection_score": 0.5615064158666047,
+            "accuracy": 0.5357042845141416,
+            "balanced_accuracy": 0.53709912989142,
+            "macro_f1": 0.5136156320751307,
+            "log_loss": 0.6880489802201047,
+            "roc_auc": 0.5719666812845411,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 5.0,
+                "iterations": 300,
+                "depth": 5,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 9,
+            "model": "CatBoost",
+            "selection_score": 0.5507440372561309,
+            "accuracy": 0.5326239148697843,
+            "balanced_accuracy": 0.5340889770562111,
+            "macro_f1": 0.5079277720410622,
+            "log_loss": 0.6903419038788894,
+            "roc_auc": 0.5578819201989537,
+            "params": {
+                "random_strength": 1.0,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 1.0,
+                "iterations": 500,
+                "depth": 4,
+                "bagging_temperature": 0.0
+            }
+        },
+        {
+            "trial": 10,
+            "model": "CatBoost",
+            "selection_score": 0.5610602726955046,
+            "accuracy": 0.538784654158499,
+            "balanced_accuracy": 0.5402283274328565,
+            "macro_f1": 0.5151768220137057,
+            "log_loss": 0.6898435753798124,
+            "roc_auc": 0.5699882492366396,
+            "params": {
+                "random_strength": 0.5,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 3.0,
+                "iterations": 500,
+                "depth": 5,
+                "bagging_temperature": 0.5
+            }
+        },
+        {
+            "trial": 11,
+            "model": "CatBoost",
+            "selection_score": 0.5564475648064323,
+            "accuracy": 0.5331839820778493,
+            "balanced_accuracy": 0.5345588821153131,
+            "macro_f1": 0.5116422349291085,
+            "log_loss": 0.6893053472941282,
+            "roc_auc": 0.5658284288169121,
+            "params": {
+                "random_strength": 0.5,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 1.0,
+                "iterations": 200,
+                "depth": 7,
+                "bagging_temperature": 0.0
+            }
+        },
+        {
+            "trial": 12,
+            "model": "CatBoost",
+            "selection_score": 0.5579684354294612,
+            "accuracy": 0.5323438812657519,
+            "balanced_accuracy": 0.5335906832068229,
+            "macro_f1": 0.5148018875600032,
+            "log_loss": 0.6883896248969367,
+            "roc_auc": 0.5684160435248776,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 3.0,
+                "iterations": 300,
+                "depth": 8,
+                "bagging_temperature": 0.5
+            }
+        },
+        {
+            "trial": 13,
+            "model": "CatBoost",
+            "selection_score": 0.5514260269684096,
+            "accuracy": 0.5284234108092971,
+            "balanced_accuracy": 0.5297890948147953,
+            "macro_f1": 0.5069643263565449,
+            "log_loss": 0.690342582168545,
+            "roc_auc": 0.5606989978913872,
+            "params": {
+                "random_strength": 0.5,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 1.0,
+                "iterations": 500,
+                "depth": 8,
+                "bagging_temperature": 0.5
+            }
+        },
+        {
+            "trial": 14,
+            "model": "CatBoost",
+            "selection_score": 0.5505317173367362,
+            "accuracy": 0.5259031083730048,
+            "balanced_accuracy": 0.5271586616551825,
+            "macro_f1": 0.50784663370016,
+            "log_loss": 0.6894922595713265,
+            "roc_auc": 0.5605487412002592,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 10.0,
+                "iterations": 500,
+                "depth": 8,
+                "bagging_temperature": 2.0
+            }
+        },
+        {
+            "trial": 15,
+            "model": "CatBoost",
+            "selection_score": 0.5530428548394888,
+            "accuracy": 0.5371044525343042,
+            "balanced_accuracy": 0.5382991444465566,
+            "macro_f1": 0.5212422749557344,
+            "log_loss": 0.6909198912523999,
+            "roc_auc": 0.5593615878650312,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.01,
+                "l2_leaf_reg": 5.0,
+                "iterations": 500,
+                "depth": 8,
+                "bagging_temperature": 0.0
+            }
+        },
+        {
+            "trial": 16,
+            "model": "CatBoost",
+            "selection_score": 0.5506943647153373,
+            "accuracy": 0.5264631755810697,
+            "balanced_accuracy": 0.5277945078199354,
+            "macro_f1": 0.5060467657780616,
+            "log_loss": 0.6897019756551467,
+            "roc_auc": 0.560508589099081,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 1.0,
+                "iterations": 700,
+                "depth": 6,
+                "bagging_temperature": 2.0
+            }
+        },
+        {
+            "trial": 17,
+            "model": "CatBoost",
+            "selection_score": 0.5589179228314258,
+            "accuracy": 0.529543545225427,
+            "balanced_accuracy": 0.5308335199778662,
+            "macro_f1": 0.5105757690266925,
+            "log_loss": 0.6883610774955553,
+            "roc_auc": 0.5709540954829514,
+            "params": {
+                "random_strength": 0.5,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 10.0,
+                "iterations": 200,
+                "depth": 7,
+                "bagging_temperature": 1.0
+            }
+        },
+        {
+            "trial": 18,
+            "model": "CatBoost",
+            "selection_score": 0.5610602726955046,
+            "accuracy": 0.538784654158499,
+            "balanced_accuracy": 0.5402283274328565,
+            "macro_f1": 0.5151768220137057,
+            "log_loss": 0.6898435753798124,
+            "roc_auc": 0.5699882492366396,
+            "params": {
+                "random_strength": 0.5,
+                "learning_rate": 0.02,
+                "l2_leaf_reg": 3.0,
+                "iterations": 200,
+                "depth": 5,
+                "bagging_temperature": 2.0
+            }
+        },
+        {
+            "trial": 19,
+            "model": "CatBoost",
+            "selection_score": 0.5506465429354575,
+            "accuracy": 0.5287034444133296,
+            "balanced_accuracy": 0.529865321069376,
+            "macro_f1": 0.5134639890478269,
+            "log_loss": 0.6897906343428732,
+            "roc_auc": 0.5595527808780637,
+            "params": {
+                "random_strength": 2.0,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 5.0,
+                "iterations": 700,
+                "depth": 7,
+                "bagging_temperature": 2.0
+            }
+        },
+        {
+            "trial": 20,
+            "model": "CatBoost",
+            "selection_score": 0.5571573002480019,
+            "accuracy": 0.5415849901988239,
+            "balanced_accuracy": 0.5429097349396683,
+            "macro_f1": 0.5220470000344214,
+            "log_loss": 0.6903055580190295,
+            "roc_auc": 0.5632633996658593,
+            "params": {
+                "random_strength": 0.0,
+                "learning_rate": 0.03,
+                "l2_leaf_reg": 3.0,
+                "iterations": 300,
+                "depth": 5,
+                "bagging_temperature": 1.0
+            }
+        }
+    ]
+}
