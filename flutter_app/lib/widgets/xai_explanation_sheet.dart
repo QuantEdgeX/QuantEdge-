@@ -80,7 +80,11 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody>
       curve: Curves.easeOutCubic,
     ));
 
-    _loadData();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _loadData();
+      }
+    });
   }
 
   @override
