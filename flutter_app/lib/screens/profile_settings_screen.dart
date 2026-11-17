@@ -494,9 +494,9 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
           ),
           const SizedBox(height: 12),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              provider.logout();
+              await provider.signOut();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppColors.rose.withOpacity(0.12),

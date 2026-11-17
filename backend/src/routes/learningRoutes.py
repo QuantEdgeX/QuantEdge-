@@ -711,6 +711,7 @@ def _profile_defaults(user_id: str) -> Dict[str, Any]:
         "onboarded": False,
         "onboardingLevel": None,
         "lastAnsweredAt": None,
+        "simulated_holdings": [],
         "createdAt": _now_iso(),
         "updatedAt": _now_iso(),
     }
@@ -1282,6 +1283,7 @@ class QwenXaiRequest(BaseModel):
     signalType: str = "BUY"
     factors: Dict[str, Any] = Field(default_factory=dict)
     userLevel: int = Field(default=2, ge=1, le=10)
+    simplify: Optional[bool] = False
 
 
 
@@ -1831,8 +1833,8 @@ async def xai_qwen(req: QwenXaiRequest) -> Dict[str, Any]:
     ticker = req.ticker.upper()
     sig = req.signalType.upper()
     factors = dict(req.factors or {})
-    user_level = req.userLevel
-    is_simple = user_level <= 2
+    user_level = max(1, req.userLevel - 1) if req.simplify else req.userLevel
+    is_simple = user_level <= 2 or req.simplify
 
     # Enrich from prediction_service if factors missing or incomplete
     if ticker and (not factors or "rsi" not in factors):
@@ -1864,7 +1866,24 @@ async def xai_qwen(req: QwenXaiRequest) -> Dict[str, Any]:
     order_book = str(factors.get("orderBookIntensity") or factors.get("volumeAnalysis") or "Steady institutional bid concentration")
     volatility = str(factors.get("volatility") or "standard market variance")
 
-    if is_simple:
+    if req.simplify:
+        prompt = f"""You are a consumer-friendly financial AI assistant called 'QuantEdge AI Insight'.
+The user tapped 'Re-explain' to request a simpler explanation.
+Rewrite the explanation for {ticker} using everyday analogies, shorter sentences, and zero financial jargon.
+Do NOT output any raw math numbers, percentages, decimal figures, variances, or technical values like '+0.45', '0.015 variance', or 'RSI 68.4'.
+
+Ticker: {ticker}
+AI Overall Signal: {sig}
+Market Context:
+- Buyer Interest: {'Strong buyer interest' if sig == 'BUY' else 'Heavy selling pressure' if sig == 'SELL' else 'Evenly matched buyers and sellers'}
+- Overall Mood: {'Positive' if sig == 'BUY' else 'Cautious' if sig == 'SELL' else 'Neutral'}
+
+Format Requirement:
+Provide exactly a 2-sentence conversational user summary using a relatable everyday analogy, followed by 3 concise bullet points:
+• **News & Social Sentiment:** (Explain news and community sentiment in everyday words with NO raw numbers)
+• **Buyer/Seller Demand:** (Explain buyer vs seller interest in everyday words with NO raw numbers)
+• **Price Momentum:** (Explain price movement in everyday words with NO raw numbers)"""
+    elif is_simple:
         prompt = f"""You are a consumer-friendly financial AI assistant called 'QuantEdge AI Insight'.
 Write strictly in plain, conversational English for everyday investors.
 Do NOT output any raw math numbers, percentages, decimal figures, variances, or technical values like '+0.45', '0.015 variance', or 'RSI 68.4'.
@@ -1929,7 +1948,32 @@ Use these bullet headers:
             logger.warning("Gemini Qwen XAI inference failed (%s)", exc)
 
     if not explanation:
-        if is_simple:
+        if req.simplify:
+            if sig == "BUY":
+                explanation = (
+                    f"Think of {ticker} like a popular store where customers are lining up at the registers with upbeat buzz all around. "
+                    f"High demand is carrying the stock forward smoothly with solid customer excitement.\n\n"
+                    f"• **News & Social Sentiment:** Recent headlines and discussions are cheerful, giving investors confidence.\n"
+                    f"• **Buyer/Seller Demand:** Buyers are outnumbering sellers, creating strong support that prevents sudden dips.\n"
+                    f"• **Price Momentum:** Price movement is stepping up steadily like a smooth escalator."
+                )
+            elif sig == "SELL":
+                explanation = (
+                    f"Think of {ticker} like an approaching storm where shoppers are packing up and heading for the exits. "
+                    f"Growing caution suggests it is wiser to hold on to your umbrella and reduce risk for now.\n\n"
+                    f"• **News & Social Sentiment:** News coverage has turned cautious, with rising worries over near-term road bumps.\n"
+                    f"• **Buyer/Seller Demand:** Sellers are outpacing buyers, leaving fewer supports to catch falling prices.\n"
+                    f"• **Price Momentum:** Upward momentum is running out of steam and beginning to slide downward."
+                )
+            else:
+                explanation = (
+                    f"Think of {ticker} like a calm afternoon where traffic is cruising at a steady, predictable speed with no jams. "
+                    f"With buyers and sellers in balance, taking your time and observing is the smartest play.\n\n"
+                    f"• **News & Social Sentiment:** News headlines and online chatter are neutral, waiting on upcoming company updates.\n"
+                    f"• **Buyer/Seller Demand:** Buying and selling orders remain balanced in a calm tug-of-war.\n"
+                    f"• **Price Momentum:** The price is drifting sideways in a gentle, predictable channel."
+                )
+        elif is_simple:
             if sig == "BUY":
                 explanation = (
                     f"QuantEdge AI Insight sees strong buyer interest pushing {ticker} upward, backed by encouraging news and steady market optimism. "
@@ -2073,26 +2117,35 @@ async def search_tickers(q: str = "") -> List[Dict[str, Any]]:
 # ============================================================================
 
 @app.get("/api/dashboard")
-async def get_dashboard() -> Dict[str, Any]:
+async def get_dashboard(userId: Optional[str] = None) -> Dict[str, Any]:
     """
     Model-driven dashboard metrics:
-    - Portfolio values dynamically calculated from live market prices of holdings
-    - XP points and user level read directly from the persistent learning store
+    - Portfolio values dynamically calculated from live market prices of practice holdings.
+      Newly registered users start with an empty practice portfolio ($0.00).
+    - XP points and user level read directly from the persistent learning store.
     """
-    profile = _get_profile("default_user")
-    xp_points = profile.get("xp", 100)
+    profile = _get_profile(userId or "default_user")
+    xp_points = profile.get("xp", 0)
     user_level = max(1, min(profile.get("score", 1), 5))
 
-    holdings_spec = [
-        ("NVDA", 5.0),
-        ("AAPL", 3.0),
-        ("MSFT", 2.0),
-    ]
-    base_cash = 10000.0
+    holdings_spec = profile.get("simulated_holdings", [])
+    if not holdings_spec:
+        return {
+            "portfolio_value": 0.00,
+            "daily_change": 0.00,
+            "weekly_change": 0.00,
+            "xp_points": xp_points,
+            "user_level": user_level,
+            "win_rate": 0.00,
+            "next_level_milestone": f"{(user_level + 1) * 1000} XP",
+        }
+
     equity_val = 0.0
     daily_chg = 0.0
 
-    for sym, qty in holdings_spec:
+    for item in holdings_spec:
+        sym = item.get("symbol")
+        qty = float(item.get("quantity", 0))
         try:
             res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
@@ -2103,7 +2156,7 @@ async def get_dashboard() -> Dict[str, Any]:
         except Exception as exc:
             logger.warning("Dashboard holding calculation error for %s: %s", sym, exc)
 
-    total_portfolio_value = round(base_cash + equity_val, 2)
+    total_portfolio_value = round(equity_val, 2)
     daily_change = round(daily_chg, 2)
     weekly_change = round(daily_chg * 3.2, 2)
 
@@ -2160,22 +2213,22 @@ async def get_assets() -> List[Dict[str, Any]]:
 # ============================================================================
 
 @app.get("/api/portfolio")
-async def get_portfolio() -> List[Dict[str, Any]]:
+async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Live portfolio holdings calculated against current market telemetry from prediction_service.
+    Start newly registered users with an empty practice portfolio ($0.00 / 0 holdings).
     """
-    holdings_spec = [
-        {"symbol": "NVDA", "name": "NVIDIA Corporation", "quantity": 5.0},
-        {"symbol": "AAPL", "name": "Apple Inc.", "quantity": 3.0},
-        {"symbol": "MSFT", "name": "Microsoft Corporation", "quantity": 2.0},
-    ]
+    profile = _get_profile(userId or "default_user")
+    holdings_spec = profile.get("simulated_holdings", [])
+    if not holdings_spec:
+        return []
 
     items = []
     equity_total = 0.0
 
     for spec in holdings_spec:
         sym = spec["symbol"]
-        qty = spec["quantity"]
+        qty = float(spec.get("quantity", 0))
         try:
             res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
@@ -2187,7 +2240,7 @@ async def get_portfolio() -> List[Dict[str, Any]]:
 
             items.append({
                 "symbol": sym,
-                "name": spec["name"],
+                "name": spec.get("name", sym),
                 "quantity": qty,
                 "current_price": curr,
                 "total_value": item_val,
@@ -2197,23 +2250,15 @@ async def get_portfolio() -> List[Dict[str, Any]]:
         except Exception as exc:
             logger.error("Portfolio holding error for %s: %s", sym, exc)
 
-    cash_reserve = 1000.0
-    portfolio_total = equity_total + cash_reserve
+    if not items:
+        return []
+
+    portfolio_total = equity_total
 
     for item in items:
         alloc = (item["_raw_val"] / portfolio_total * 100.0) if portfolio_total else 0.0
         item["allocation"] = f"{alloc:.1f}%"
         del item["_raw_val"]
-
-    items.append({
-        "symbol": "CASH",
-        "name": "Cash Reserve",
-        "quantity": 1.0,
-        "current_price": cash_reserve,
-        "total_value": cash_reserve,
-        "day_change": 0.0,
-        "allocation": f"{(cash_reserve / portfolio_total * 100.0):.1f}%" if portfolio_total else "0.0%",
-    })
 
     return items
 

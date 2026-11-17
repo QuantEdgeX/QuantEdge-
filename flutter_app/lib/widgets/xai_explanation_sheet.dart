@@ -171,11 +171,13 @@ class _XaiExplanationSheetBodyState extends State<_XaiExplanationSheetBody>
           'Strong buyer demand',
     };
 
-    final explanation = await quizProvider.qwenXaiService.fetchExplanation(
+    final explanation = await quizProvider.fetchQwenExplanation(
       ticker: widget.ticker,
       signalType: effectiveSignal,
       factors: effectiveFactors,
       userLevel: userLevel,
+      forceRefresh: true,
+      simplify: true,
     );
 
     if (mounted) {

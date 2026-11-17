@@ -127,5 +127,30 @@ void main() {
         expect(explanation.contains('•'), isTrue);
       });
     });
+
+    group('Simplified Re-explain Mode', () {
+      test('generates ultra-simplified everyday analogy without technical jargon', () async {
+        final explanation = await service.fetchExplanation(
+          ticker: 'NVDA',
+          signalType: 'BUY',
+          userLevel: 4, // Higher level stepped down by simplify
+          simplify: true,
+          factors: {
+            'rsi': 68.4,
+            'finbertSentiment': 0.88,
+            'volatility': 'Low',
+            'orderBookIntensity': '39% Institutional Accumulation',
+          },
+        );
+
+        expect(explanation, contains('Think of NVDA'));
+        expect(explanation, contains('News & Social Sentiment'));
+        expect(explanation, contains('Buyer/Seller Demand'));
+        expect(explanation, contains('Price Momentum'));
+        expect(explanation.contains('•'), isTrue);
+        expect(explanation, isNot(contains('68.4')));
+        expect(explanation, isNot(contains('0.88')));
+      });
+    });
   });
 }

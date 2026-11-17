@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../models/app_models.dart';
 import '../models/learning_models.dart';
 import '../providers/learning_provider.dart' show AppTab;
@@ -118,9 +119,15 @@ class QuizProvider extends ChangeNotifier {
 
   QwenXaiService get qwenXaiService => _qwenXaiService;
 
+  // ─── Firebase Auth & User State ──────────────────────────────────────────
+  String _userId = '';
+  StreamSubscription<User?>? _authSubscription;
+
+  String get userId => _userId.isNotEmpty ? _userId : 'default_user';
+  String get learningUserId => userId;
+
   // ─── Disha's Learning Engine State ───────────────────────────────────────
   final LearningService _learningService = LearningService();
-  final String _learningUserId = 'disha1_test';
   List<LearningTopic> _learningTopics = [];
   LearningProgress? _learningProgress;
   LearningLesson? _currentLearningLesson;
@@ -137,7 +144,44 @@ class QuizProvider extends ChangeNotifier {
   String? _learningError;
 
   QuizProvider() {
+    _initAuthListener();
     _initInitialData();
+  }
+
+  void _initAuthListener() {
+    try {
+      if (Firebase.apps.isNotEmpty) {
+        final current = FirebaseAuth.instance.currentUser;
+        if (current != null) {
+          _userId = current.uid;
+          _userProfile = _userProfile.copyWith(
+            uid: current.uid,
+            name: current.displayName ?? current.email?.split('@').first ?? 'Trader',
+            email: current.email ?? '',
+          );
+        }
+        _authSubscription = FirebaseAuth.instance.authStateChanges().listen((User? user) {
+          if (user != null) {
+            _userId = user.uid;
+            _userProfile = _userProfile.copyWith(
+              uid: user.uid,
+              name: user.displayName ?? user.email?.split('@').first ?? 'Trader',
+              email: user.email ?? '',
+            );
+            notifyListeners();
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Auth listener init notice: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _authSubscription?.cancel();
+    _searchDebounce?.cancel();
+    super.dispose();
   }
 
   // Getters
@@ -199,7 +243,6 @@ class QuizProvider extends ChangeNotifier {
   List<Map<String, String>> get popularTickers => _popularTickers;
 
   // Disha's Learning Engine Getters
-  String get learningUserId => _learningUserId;
   List<LearningTopic> get learningTopics => _learningTopics;
   LearningProgress? get learningProgress => _learningProgress;
   LearningLesson? get currentLearningLesson => _currentLearningLesson;
@@ -252,7 +295,7 @@ class QuizProvider extends ChangeNotifier {
 
     try {
       final data = await LearningEngineService.fetchQuestion(
-        userId: 'user_demo_123',
+        userId: userId,
         xaiLevel: _userLevel,
       );
 
@@ -286,7 +329,7 @@ class QuizProvider extends ChangeNotifier {
         session: _activeSession!,
         selectedOptionId: optionId,
         questionId: _currentQuestion!['questionId'] as String,
-        userId: 'user_demo_123',
+        userId: userId,
       );
 
       if (response != null) {
@@ -407,8 +450,8 @@ class QuizProvider extends ChangeNotifier {
 
     try {
       final results = await Future.wait([
-        _learningService.getTopics(userId: _learningUserId),
-        _learningService.getProgress(_learningUserId),
+        _learningService.getTopics(userId: userId),
+        _learningService.getProgress(userId),
       ]);
 
       final topicsJson = results[0]['topics'] as List? ?? [];
@@ -433,7 +476,7 @@ class QuizProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final data = await _learningService.startLesson(_learningUserId, topicId: topicId);
+      final data = await _learningService.startLesson(userId, topicId: topicId);
       if (data['completedAllTopics'] == true) {
         _learningError = (data['message'] as String?) ?? 'All topics completed!';
         return false;
@@ -491,7 +534,7 @@ class QuizProvider extends ChangeNotifier {
 
     try {
       final data = await _learningService.submitAnswer(
-        userId: _learningUserId,
+        userId: userId,
         lessonId: _currentLearningLesson!.lessonId,
         questionId: question.id,
         selectedOptionId: _selectedLearningOptionId!,
@@ -643,7 +686,7 @@ class QuizProvider extends ChangeNotifier {
     _isLoadingDashboard = true;
     notifyListeners();
 
-    _dashboardMetrics = await _apiService.fetchDashboardMetrics();
+    _dashboardMetrics = await _apiService.fetchDashboardMetrics(userId: userId);
 
     _isLoadingDashboard = false;
     notifyListeners();
@@ -653,7 +696,7 @@ class QuizProvider extends ChangeNotifier {
     _isLoadingPortfolio = true;
     notifyListeners();
 
-    _portfolioHoldings = await _apiService.fetchPortfolioData();
+    _portfolioHoldings = await _apiService.fetchPortfolioData(userId: userId);
 
     _isLoadingPortfolio = false;
     notifyListeners();
@@ -794,11 +837,13 @@ class QuizProvider extends ChangeNotifier {
     required String signalType,
     required Map<String, dynamic> factors,
     int? userLevel,
+    bool forceRefresh = false,
+    bool simplify = false,
   }) async {
     final effectiveLevel = userLevel ?? _userLevel;
     final cacheKey =
-        '${ticker.toUpperCase()}_${signalType.toUpperCase()}_lvl$effectiveLevel';
-    if (_qwenExplanationCache.containsKey(cacheKey)) {
+        '${ticker.toUpperCase()}_${signalType.toUpperCase()}_lvl$effectiveLevel${simplify ? "_simple" : ""}';
+    if (!forceRefresh && _qwenExplanationCache.containsKey(cacheKey)) {
       return _qwenExplanationCache[cacheKey]!;
     }
     final explanation = await _qwenXaiService.fetchExplanation(
@@ -806,6 +851,7 @@ class QuizProvider extends ChangeNotifier {
       signalType: signalType,
       factors: factors,
       userLevel: effectiveLevel,
+      simplify: simplify,
     );
     _qwenExplanationCache[cacheKey] = explanation;
     return explanation;
@@ -813,10 +859,37 @@ class QuizProvider extends ChangeNotifier {
 
   // ─── Auth ────────────────────────────────────────────────────────────────
 
-  void completeLogin({required String name, required String email}) {
-    _userProfile = _userProfile.copyWith(name: name, email: email);
+  void completeLogin({
+    required String uid,
+    required String name,
+    required String email,
+  }) {
+    _userId = uid;
+    _userProfile = _userProfile.copyWith(uid: uid, name: name, email: email);
     _syncToFirebase();
+    // Clean initial state: start newly registered users with an empty practice portfolio
+    _portfolioHoldings = [];
+    _dashboardMetrics = null;
     setPhase(AppPhase.enrichment);
+  }
+
+  Future<void> signOut() async {
+    try {
+      if (Firebase.apps.isNotEmpty) {
+        await FirebaseAuth.instance.signOut();
+      }
+    } catch (e) {
+      debugPrint('Error signing out of Firebase: $e');
+    }
+    _userId = '';
+    _userProfile = const UserProfile();
+    _portfolioHoldings = [];
+    _dashboardMetrics = null;
+    _activeSession = null;
+    _currentQuestion = null;
+    _completionSummary = null;
+    setPhase(AppPhase.login);
+    notifyListeners();
   }
 
   void updateUserProfile(UserProfile updated) {
@@ -831,8 +904,7 @@ class QuizProvider extends ChangeNotifier {
   }
 
   void logout() {
-    _phase = AppPhase.login;
-    notifyListeners();
+    signOut();
   }
 
   // ─── Enrichment ──────────────────────────────────────────────────────────

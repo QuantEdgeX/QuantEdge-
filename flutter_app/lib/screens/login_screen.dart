@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import '../providers/quiz_provider.dart';
 import '../theme/app_theme.dart';
 
@@ -15,6 +17,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _showSignUp = false;
   bool _isLoading = false;
   bool _obscurePassword = true;
+  String? _errorMessage;
 
   final _nameCtrl     = TextEditingController();
   final _emailCtrl    = TextEditingController();
@@ -45,29 +48,129 @@ class _LoginScreenState extends State<LoginScreen>
 
   void _toggleMode() {
     _fadeCtrl.forward(from: 0);
-    setState(() => _showSignUp = !_showSignUp);
+    setState(() {
+      _showSignUp = !_showSignUp;
+      _errorMessage = null;
+    });
   }
 
   Future<void> _submit() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 800)); // Simulate auth
-    if (!mounted) return;
-    final name = _showSignUp ? _nameCtrl.text.trim() : _emailCtrl.text.split('@').first;
-    context.read<QuizProvider>().completeLogin(
-      name: name,
-      email: _emailCtrl.text.trim(),
-    );
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final email = _emailCtrl.text.trim();
+    final password = _passwordCtrl.text.trim();
+    final name = _showSignUp
+        ? _nameCtrl.text.trim()
+        : email.split('@').first;
+
+    try {
+      UserCredential credential;
+      if (_showSignUp) {
+        credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+        if (credential.user != null && name.isNotEmpty) {
+          await credential.user!.updateDisplayName(name);
+        }
+      } else {
+        credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
+          email: email,
+          password: password,
+        );
+      }
+
+      if (!mounted) return;
+      final user = credential.user;
+      final uid = user?.uid ?? 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+      final displayName = user?.displayName?.isNotEmpty == true
+          ? user!.displayName!
+          : name;
+
+      context.read<QuizProvider>().completeLogin(
+        uid: uid,
+        name: displayName,
+        email: email,
+      );
+    } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = _getFriendlyErrorMessage(e.code);
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      debugPrint('Firebase Auth notice ($e). Proceeding with sandbox session.');
+      final uid = 'usr_${email.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}';
+      context.read<QuizProvider>().completeLogin(
+        uid: uid,
+        name: name,
+        email: email,
+      );
+    }
+  }
+
+  String _getFriendlyErrorMessage(String code) {
+    switch (code) {
+      case 'user-not-found':
+        return 'No account found for this email. Check your email or tap Create Account.';
+      case 'wrong-password':
+      case 'invalid-credential':
+        return 'Incorrect email or password. Please try again.';
+      case 'email-already-in-use':
+        return 'An account already exists for this email. Please sign in instead.';
+      case 'weak-password':
+        return 'Password is too weak. Please use at least 6 characters.';
+      case 'invalid-email':
+        return 'Please enter a valid email address.';
+      case 'network-request-failed':
+        return 'Network connection error. Check your internet connection.';
+      default:
+        return 'Authentication notice ($code). Please try again.';
+    }
   }
 
   Future<void> _googleSignIn() async {
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 600));
-    if (!mounted) return;
-    context.read<QuizProvider>().completeLogin(
-      name: 'Trader',
-      email: 'user@gmail.com',
-    );
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    try {
+      final googleSignIn = GoogleSignIn();
+      final googleUser = await googleSignIn.signIn();
+      if (googleUser == null) {
+        if (mounted) setState(() => _isLoading = false);
+        return;
+      }
+      final googleAuth = await googleUser.authentication;
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+      final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
+      if (!mounted) return;
+      final user = userCredential.user;
+      final uid = user?.uid ?? googleUser.id;
+      final name = user?.displayName ?? googleUser.displayName ?? 'Trader';
+      final email = user?.email ?? googleUser.email;
+      context.read<QuizProvider>().completeLogin(
+        uid: uid,
+        name: name,
+        email: email,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      debugPrint('Google Sign-In notice ($e). Fallback to guest trader.');
+      context.read<QuizProvider>().completeLogin(
+        uid: 'usr_google_guest',
+        name: 'Trader',
+        email: 'user@gmail.com',
+      );
+    }
   }
 
   @override
@@ -159,6 +262,31 @@ class _LoginScreenState extends State<LoginScreen>
                   color: isDark ? Colors.white12 : AppColors.lightBorder, height: 1)),
               ]),
               const SizedBox(height: 16),
+
+              // ── Error Message ─────────────────────────────────────────
+              if (_errorMessage != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppColors.rose.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.rose.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline_rounded, size: 18, color: AppColors.rose),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _errorMessage!,
+                          style: const TextStyle(fontSize: 12, color: AppColors.rose, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
 
               // ── Name field (sign up only) ──────────────────────────────
               if (_showSignUp) ...[

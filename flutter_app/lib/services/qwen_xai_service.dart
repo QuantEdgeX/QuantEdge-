@@ -12,6 +12,7 @@ class QwenXaiService {
   const QwenXaiService({this.customEndpoint});
 
   /// Main inference method.
+  /// Main inference method.
   /// Calls the Qwen LLM endpoint with a 5-second timeout, falling back
   /// seamlessly to structured offline narrative templates upon failure or timeout.
   Future<String> fetchExplanation({
@@ -19,7 +20,9 @@ class QwenXaiService {
     required String signalType,
     required Map<String, dynamic> factors,
     required int userLevel,
+    bool simplify = false,
   }) async {
+    final effectiveLevel = simplify ? (userLevel > 1 ? userLevel - 1 : 1) : userLevel;
     try {
       final endpoint = customEndpoint ?? '${ApiService.baseUrl}/api/learning/xai/qwen';
       final uri = Uri.parse(endpoint);
@@ -32,7 +35,8 @@ class QwenXaiService {
               'ticker': ticker,
               'signalType': signalType,
               'factors': factors,
-              'userLevel': userLevel,
+              'userLevel': effectiveLevel,
+              'simplify': simplify,
             }),
           )
           .timeout(const Duration(seconds: 5));
@@ -56,7 +60,8 @@ class QwenXaiService {
       ticker: ticker,
       signalType: signalType,
       factors: factors,
-      userLevel: userLevel,
+      userLevel: effectiveLevel,
+      simplify: simplify,
     );
   }
 
@@ -72,6 +77,7 @@ class QwenXaiService {
     required String signalType,
     required Map<String, dynamic> factors,
     required int userLevel,
+    bool simplify = false,
   }) {
     final rawRsi = factors['rsi'];
     final double rsi = (rawRsi is num)
@@ -90,7 +96,26 @@ class QwenXaiService {
     final String volatility = factors['volatility']?.toString() ?? 'normal channel volatility';
 
     final sig = signalType.toUpperCase();
-    final bool isSimpleLevel = userLevel <= 2;
+    final bool isSimpleLevel = userLevel <= 2 || simplify;
+
+    if (simplify) {
+      if (sig == 'BUY') {
+        return 'Think of $ticker like a popular store where customers are lining up at the registers with upbeat buzz all around. High customer excitement and strong demand are carrying the stock forward smoothly.\n\n'
+            '• **News & Social Sentiment:** Recent headlines and discussions are cheerful, giving investors confidence.\n'
+            '• **Buyer/Seller Demand:** Buyers are outnumbering sellers, creating strong support that prevents sudden dips.\n'
+            '• **Price Momentum:** Price movement is stepping up steadily like a smooth escalator.';
+      } else if (sig == 'SELL') {
+        return 'Think of $ticker like an approaching storm where shoppers are packing up and heading for the exits. Growing caution suggests it is wiser to hold on to your umbrella and reduce risk for now.\n\n'
+            '• **News & Social Sentiment:** News coverage has turned cautious, with rising worries over near-term road bumps.\n'
+            '• **Buyer/Seller Demand:** Sellers are outpacing buyers, leaving fewer supports to catch falling prices.\n'
+            '• **Price Momentum:** Upward momentum is running out of steam and beginning to slide downward.';
+      } else {
+        return 'Think of $ticker like a calm afternoon where traffic is cruising at a steady, predictable speed with no jams. With buyers and sellers in balance, taking your time and observing is the smartest play.\n\n'
+            '• **News & Social Sentiment:** News headlines and online chatter are neutral, waiting on upcoming company updates.\n'
+            '• **Buyer/Seller Demand:** Buying and selling orders remain balanced in a calm tug-of-war.\n'
+            '• **Price Momentum:** The price is drifting sideways in a gentle, predictable channel.';
+      }
+    }
 
     if (isSimpleLevel) {
       // ── Level 1 & 2: Simple / Layman Narrative (Zero raw numbers) ─────────

@@ -80,10 +80,13 @@ class ApiService {
     return _generateFallbackReply(query);
   }
 
-  Future<DashboardMetrics> fetchDashboardMetrics() async {
+  Future<DashboardMetrics> fetchDashboardMetrics({String? userId}) async {
     try {
+      final query = (userId != null && userId.isNotEmpty)
+          ? '?userId=${Uri.encodeComponent(userId)}'
+          : '';
       final response = await http
-          .get(Uri.parse('$baseUrl/api/dashboard'))
+          .get(Uri.parse('$baseUrl/api/dashboard$query'))
           .timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
@@ -93,17 +96,21 @@ class ApiService {
     return _fallbackDashboardMetrics();
   }
 
-  Future<List<PortfolioHolding>> fetchPortfolioData() async {
+  Future<List<PortfolioHolding>> fetchPortfolioData({String? userId}) async {
     try {
+      final query = (userId != null && userId.isNotEmpty)
+          ? '?userId=${Uri.encodeComponent(userId)}'
+          : '';
       final response = await http
-          .get(Uri.parse('$baseUrl/api/portfolio'))
+          .get(Uri.parse('$baseUrl/api/portfolio$query'))
           .timeout(const Duration(seconds: 4));
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         return data.map((e) => PortfolioHolding.fromJson(e)).toList();
       }
     } catch (_) {}
-    return _fallbackPortfolioHoldings();
+    // Clean initial state: empty simulated portfolio
+    return [];
   }
 
   static final List<MarketAsset> _fallbackAssets = [
@@ -176,58 +183,15 @@ class ApiService {
 
   static DashboardMetrics _fallbackDashboardMetrics() {
     return DashboardMetrics(
-      portfolioValue: 10500.00,
-      dailyChange: 125.50,
-      weeklyChange: 875.25,
-      xpPoints: 2450,
-      userLevel: 2,
-      winRate: 0.68,
-      nextLevelMilestone: '3500 XP',
+      portfolioValue: 0.00,
+      dailyChange: 0.00,
+      weeklyChange: 0.00,
+      xpPoints: 0,
+      userLevel: 1,
+      winRate: 0.00,
+      nextLevelMilestone: '1000 XP',
     );
   }
 
-  static List<PortfolioHolding> _fallbackPortfolioHoldings() {
-    return [
-      PortfolioHolding(
-        symbol: 'NVDA',
-        name: 'NVIDIA Corporation',
-        quantity: 5.0,
-        currentPrice: 875.50,
-        totalValue: 4377.50,
-        dayChange: 45.25,
-        dayChangePercent: 1.05,
-        allocation: '41.7%',
-      ),
-      PortfolioHolding(
-        symbol: 'AAPL',
-        name: 'Apple Inc.',
-        quantity: 3.0,
-        currentPrice: 228.75,
-        totalValue: 686.25,
-        dayChange: -12.50,
-        dayChangePercent: -1.80,
-        allocation: '6.5%',
-      ),
-      PortfolioHolding(
-        symbol: 'TSLA',
-        name: 'Tesla Inc.',
-        quantity: 2.5,
-        currentPrice: 245.30,
-        totalValue: 613.25,
-        dayChange: 18.75,
-        dayChangePercent: 3.15,
-        allocation: '5.8%',
-      ),
-      PortfolioHolding(
-        symbol: 'CASH',
-        name: 'Cash Reserve',
-        quantity: 1.0,
-        currentPrice: 4823.00,
-        totalValue: 4823.00,
-        dayChange: 0.0,
-        dayChangePercent: 0.0,
-        allocation: '46.0%',
-      ),
-    ];
-  }
+
 }

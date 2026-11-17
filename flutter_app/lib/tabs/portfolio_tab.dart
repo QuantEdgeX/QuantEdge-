@@ -83,7 +83,7 @@ class PortfolioTab extends StatelessWidget {
                 child: Column(
                   children: [
                     Text(
-                      '"Portfolio Module Locked. Achieve Level 3 Status to Unlock Advanced Asset Allocation Layers."',
+                      '"Simulated Practice Portfolio Locked. Achieve Level 3 Status to Unlock Advanced Paper-Trading Allocation Layers."',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 14,
@@ -125,7 +125,7 @@ class PortfolioTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'PORTFOLIO ALLOCATION',
+                    'SIMULATED PRACTICE PORTFOLIO',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w900,
@@ -134,7 +134,7 @@ class PortfolioTab extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'Asset Holdings',
+                    'Practice Holdings',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.w900,
@@ -182,7 +182,7 @@ class PortfolioTab extends StatelessWidget {
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 40),
                 child: Text(
-                  'No portfolio data available',
+                  'Your practice portfolio is empty. Add stocks from your watchlist to start learning!',
                   style: TextStyle(
                     color:
                         isDark ? Colors.white60 : AppColors.lightTextSecondary,

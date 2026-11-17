@@ -4,6 +4,7 @@ import 'theme/app_theme.dart';
 import 'providers/quiz_provider.dart';
 import 'providers/learning_provider.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'firebase_options.dart';
 
 // Existing screens — unchanged
 import 'screens/onboarding_quiz_screen.dart';
@@ -23,7 +24,9 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   try {
-    await Firebase.initializeApp();
+    await Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    );
     debugPrint('Firebase initialized successfully.');
   } catch (e) {
     debugPrint('Firebase initialization skipped (missing config): $e');

@@ -136,13 +136,13 @@ class DashboardMetrics {
 
   factory DashboardMetrics.fromJson(Map<String, dynamic> json) {
     return DashboardMetrics(
-      portfolioValue: (json['portfolio_value'] as num?)?.toDouble() ?? 10500.0,
-      dailyChange: (json['daily_change'] as num?)?.toDouble() ?? 125.50,
-      weeklyChange: (json['weekly_change'] as num?)?.toDouble() ?? 875.25,
-      xpPoints: json['xp_points'] as int? ?? 2450,
-      userLevel: json['user_level'] as int? ?? 2,
-      winRate: (json['win_rate'] as num?)?.toDouble() ?? 0.68,
-      nextLevelMilestone: json['next_level_milestone'] as String? ?? '3500 XP',
+      portfolioValue: (json['portfolio_value'] as num?)?.toDouble() ?? 0.0,
+      dailyChange: (json['daily_change'] as num?)?.toDouble() ?? 0.0,
+      weeklyChange: (json['weekly_change'] as num?)?.toDouble() ?? 0.0,
+      xpPoints: json['xp_points'] as int? ?? 0,
+      userLevel: json['user_level'] as int? ?? 1,
+      winRate: (json['win_rate'] as num?)?.toDouble() ?? 0.0,
+      nextLevelMilestone: json['next_level_milestone'] as String? ?? '1000 XP',
     );
   }
 }
@@ -193,6 +193,7 @@ class PortfolioHolding {
 
 // User profile from login + enrichment flow
 class UserProfile {
+  final String uid;
   final String name;
   final String email;
   final String experienceLevel;
@@ -202,6 +203,7 @@ class UserProfile {
   final List<String> chosenTickers;
 
   const UserProfile({
+    this.uid = '',
     this.name = '',
     this.email = '',
     this.experienceLevel = '',
@@ -212,6 +214,7 @@ class UserProfile {
   });
 
   UserProfile copyWith({
+    String? uid,
     String? name,
     String? email,
     String? experienceLevel,
@@ -221,6 +224,7 @@ class UserProfile {
     List<String>? chosenTickers,
   }) {
     return UserProfile(
+      uid: uid ?? this.uid,
       name: name ?? this.name,
       email: email ?? this.email,
       experienceLevel: experienceLevel ?? this.experienceLevel,

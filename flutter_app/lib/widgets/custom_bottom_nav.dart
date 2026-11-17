@@ -22,7 +22,7 @@ class CustomBottomNavBar extends StatelessWidget {
       ),
       const _NavItem(
         tab: AppTab.portfolio,
-        label: 'Portfolio',
+        label: 'Practice',
         icon: AppIcons.briefcase,
       ),
       const _NavItem(

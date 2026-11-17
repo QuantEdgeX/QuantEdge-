@@ -120,7 +120,7 @@ class DashboardTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'PORTFOLIO OVERVIEW',
+                    'PRACTICE PORTFOLIO OVERVIEW',
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w900,
@@ -209,7 +209,7 @@ class DashboardTab extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Portfolio Value',
+                    'Practice Portfolio Value',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
