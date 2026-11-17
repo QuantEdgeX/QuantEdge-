@@ -10,17 +10,22 @@ class PracticeService {
     return 'http://127.0.0.1:8000';
   }
 
-  static const String _userId = 'user_demo_123';
+  static String _userId = 'user_demo_123';
+  static void setUserId(String uid) {
+    if (uid.isNotEmpty) _userId = uid;
+  }
+  static String get userId => _userId;
 
   /// POST /api/learning/practice/question
   /// Returns question + user state (XP, hearts, streak, difficulty).
   static Future<Map<String, dynamic>?> fetchQuestion({
+    String? userId,
     int xaiLevel = 2,
     int? currentXp,
   }) async {
     try {
       final body = <String, dynamic>{
-        'userId': _userId,
+        'userId': userId ?? _userId,
         'xaiLevel': xaiLevel,
       };
       if (currentXp != null) body['currentXp'] = currentXp;
@@ -45,6 +50,7 @@ class PracticeService {
   /// POST /api/learning/practice/submit
   /// Returns isCorrect, xpDelta, newXp, streak, hearts, levelUp info, roundComplete.
   static Future<Map<String, dynamic>?> submitAnswer({
+    String? userId,
     required String questionId,
     required String selectedOptionId,
     required String correctOptionId,
@@ -54,7 +60,7 @@ class PracticeService {
   }) async {
     try {
       final body = <String, dynamic>{
-        'userId': _userId,
+        'userId': userId ?? _userId,
         'questionId': questionId,
         'selectedOptionId': selectedOptionId,
         'correctOptionId': correctOptionId,
@@ -81,10 +87,11 @@ class PracticeService {
   }
 
   /// GET /api/learning/practice/profile?userId=...
-  static Future<Map<String, dynamic>?> fetchProfile() async {
+  static Future<Map<String, dynamic>?> fetchProfile({String? userId}) async {
     try {
+      final activeUid = userId ?? _userId;
       final response = await http
-          .get(Uri.parse('$baseUrl/api/learning/practice/profile?userId=$_userId'))
+          .get(Uri.parse('$baseUrl/api/learning/practice/profile?userId=$activeUid'))
           .timeout(const Duration(seconds: 6));
 
       if (response.statusCode == 200) {

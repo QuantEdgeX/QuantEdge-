@@ -169,6 +169,7 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
                             ticker: r.ticker, name: r.name,
                             price: r.price > 0 ? '\$${r.price.toStringAsFixed(2)}' : '—',
                             change: r.changePercent,
+                            signal: r.signal,
                             isSelected: provider.isTickerSelected(r.ticker),
                             canSelect: isEditing || selected.length < 3 || provider.isTickerSelected(r.ticker),
                             isDark: isDark,
@@ -178,6 +179,7 @@ class _TickerSelectionScreenState extends State<TickerSelectionScreen> {
                             name: t['name']!,
                             price: '—',
                             change: 0,
+                            signal: null,
                             isSelected: provider.isTickerSelected(t['ticker']!),
                             canSelect: isEditing || selected.length < 3 || provider.isTickerSelected(t['ticker']!),
                             isDark: isDark,
@@ -314,6 +316,7 @@ class _SearchResultTile extends StatelessWidget {
   final String name;
   final String price;
   final double change;
+  final String? signal;
   final bool isSelected;
   final bool canSelect;
   final bool isDark;
@@ -321,7 +324,7 @@ class _SearchResultTile extends StatelessWidget {
 
   const _SearchResultTile({
     required this.ticker, required this.name, required this.price,
-    required this.change, required this.isSelected, required this.canSelect,
+    required this.change, this.signal, required this.isSelected, required this.canSelect,
     required this.isDark, required this.onTap,
   });
 
@@ -398,6 +401,35 @@ class _SearchResultTile extends StatelessWidget {
                   ),
               ],
             ),
+            if (signal != null && signal!.isNotEmpty) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: (signal == 'BUY'
+                          ? AppColors.emerald
+                          : (signal == 'SELL' ? AppColors.rose : AppColors.amber))
+                      .withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: (signal == 'BUY'
+                            ? AppColors.emerald
+                            : (signal == 'SELL' ? AppColors.rose : AppColors.amber))
+                        .withOpacity(0.3),
+                  ),
+                ),
+                child: Text(
+                  signal!,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    color: signal == 'BUY'
+                        ? AppColors.emerald
+                        : (signal == 'SELL' ? AppColors.rose : AppColors.amber),
+                  ),
+                ),
+              ),
+            ],
             const SizedBox(width: 8),
             // Inspect ticker detail button
             GestureDetector(

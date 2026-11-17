@@ -11,6 +11,7 @@ import '../providers/learning_provider.dart' show AppTab;
 import '../services/api_service.dart';
 import '../services/learning_engine_service.dart';
 import '../services/learning_service.dart';
+import '../services/practice_service.dart';
 import '../services/qwen_xai_service.dart';
 
 enum AppPhase {
@@ -155,6 +156,7 @@ class QuizProvider extends ChangeNotifier {
         final current = FirebaseAuth.instance.currentUser;
         if (current != null) {
           _userId = current.uid;
+          PracticeService.setUserId(current.uid);
           _userProfile = _userProfile.copyWith(
             uid: current.uid,
             name: current.displayName ?? current.email?.split('@').first ?? 'Trader',
@@ -164,6 +166,7 @@ class QuizProvider extends ChangeNotifier {
         _authSubscription = FirebaseAuth.instance.authStateChanges().listen((User? user) {
           if (user != null) {
             _userId = user.uid;
+            PracticeService.setUserId(user.uid);
             _userProfile = _userProfile.copyWith(
               uid: user.uid,
               name: user.displayName ?? user.email?.split('@').first ?? 'Trader',
@@ -867,6 +870,7 @@ class QuizProvider extends ChangeNotifier {
     required String email,
   }) {
     _userId = uid;
+    PracticeService.setUserId(uid);
     _userProfile = _userProfile.copyWith(uid: uid, name: name, email: email);
     _syncToFirebase();
     // Clean initial state: start newly registered users with an empty practice portfolio
@@ -884,6 +888,7 @@ class QuizProvider extends ChangeNotifier {
       debugPrint('Error signing out of Firebase: $e');
     }
     _userId = '';
+    PracticeService.setUserId('user_demo_123');
     _userProfile = const UserProfile();
     _portfolioHoldings = [];
     _dashboardMetrics = null;
