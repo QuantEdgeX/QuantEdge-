@@ -94,6 +94,24 @@ class LearningService {
   }
 
   // ---------------------------------------------------------
+  // PREWARM LESSON
+  // ---------------------------------------------------------
+
+  Future<void> prewarmLesson(String userId, {String? topicId}) async {
+    try {
+      final Map<String, dynamic> body = {'userId': userId};
+      if (topicId != null && topicId.isNotEmpty) {
+        body['topicId'] = topicId;
+      }
+      await http.post(
+        Uri.parse('$baseUrl/api/learning/lesson/prewarm'),
+        headers: _jsonHeaders,
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 4));
+    } catch (_) {}
+  }
+
+  // ---------------------------------------------------------
   // START LESSON
   // ---------------------------------------------------------
 

@@ -78,12 +78,6 @@ class _DashboardTabState extends State<DashboardTab> {
 
     // Map active tickers to MarketAsset instances
     final List<MarketAsset> displayAssets = activeTickers.map((ticker) {
-      final existing = assets.cast<MarketAsset?>().firstWhere(
-        (a) => a?.ticker.toUpperCase() == ticker.toUpperCase(),
-        orElse: () => null,
-      );
-      if (existing != null) return existing;
-
       final cached = quizProvider.tickerDetailCache[ticker.toUpperCase()];
       if (cached != null) {
         return MarketAsset(
@@ -98,14 +92,20 @@ class _DashboardTabState extends State<DashboardTab> {
         );
       }
 
+      final existing = assets.cast<MarketAsset?>().firstWhere(
+        (a) => a?.ticker.toUpperCase() == ticker.toUpperCase(),
+        orElse: () => null,
+      );
+      if (existing != null) return existing;
+
       return MarketAsset(
         ticker: ticker.toUpperCase(),
-        status: 'BUY',
-        confidence: '88%',
-        sentiment: '0.45',
+        status: 'HOLD',
+        confidence: '50%',
+        sentiment: '0.00',
         insight:
-            'Strong model alignment and positive factor momentum detected for $ticker.',
-        rsi: 54.0,
+            'Awaiting live 4-model ensemble telemetry for $ticker.',
+        rsi: 50.0,
       );
     }).toList();
 

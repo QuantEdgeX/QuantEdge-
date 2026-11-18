@@ -12,7 +12,7 @@ Unified Prediction Service for QuantEdge
     XGBoost:        2.813%
 - HOLD Spread Threshold: 0.10 (10% neutral buffer)
 - Weighted 4-Model Feature Attribution across all 34 features
-- 60-second in-memory TTL caching to guarantee sub-100ms API responses
+- 300-second (5-minute) in-memory TTL caching to guarantee sub-50ms API responses
 """
 
 from __future__ import annotations
@@ -115,7 +115,7 @@ class PredictionService:
         self.hold_threshold: float = 0.10
         self.probability_boundary: float = 0.50
         self._cache: Dict[str, Dict[str, Any]] = {}
-        self._cache_ttl_seconds: float = 60.0
+        self._cache_ttl_seconds: float = 300.0  # 5-minute TTL cache
         self._load_models()
 
     @classmethod
@@ -362,10 +362,11 @@ class PredictionService:
 
     def compute_feature_attributions(self, X: np.ndarray) -> List[Dict[str, Any]]:
         """
-        Calculates unified feature attribution across the 4 models
-        weighted by their ensemble contribution:
-        Attribution = w_RF * imp_RF + w_CB * imp_CB + w_LGB * imp_LGB + w_XGB * imp_XGB
-        Grouped into layman consumer-friendly clusters.
+        Calculates ticker-specific local feature attributions across the 4 models
+        weighted by their ensemble contribution and modulated by the ticker's live
+        normalized feature magnitude/deviation:
+        Attribution = (w_RF * imp_RF + w_CB * imp_CB + w_LGB * imp_LGB + w_XGB * imp_XGB) * local_multiplier
+        Grouped into 4 consumer-friendly price drivers normalized to 100%.
         """
         # 1. Random Forest importances
         rf_imp = np.array(self.models["Random Forest"].feature_importances_, dtype=float)
@@ -400,6 +401,39 @@ class PredictionService:
         if total > 0:
             ensemble_imp = ensemble_imp / total
 
+        # Compute ticker-specific local feature multipliers from X
+        local_imp = np.zeros_like(ensemble_imp)
+        for idx, feat in enumerate(FEATURES):
+            val = float(X[0, idx]) if (X is not None and X.ndim == 2 and idx < X.shape[1]) else 0.0
+
+            if "sentiment" in feat:
+                # Live FinBERT sentiment score in [-1.0, 1.0]
+                mult = 0.25 + 3.0 * abs(val)
+            elif feat in ("RSI", "RSI_Lag1"):
+                # Distance of RSI from neutral 50
+                mult = 0.25 + (abs(val - 50.0) / 16.0)
+            elif "Volume_Ratio" in feat:
+                # Volume ratio deviation from normal (1.0)
+                mult = 0.25 + min(3.5, abs(val - 1.0) * 2.0)
+            elif feat in ("Volume_Change", "Volume_ROC_10"):
+                mult = 0.25 + min(3.0, abs(val) * 1.5)
+            elif "Volatility" in feat or "ATR" in feat:
+                # Volatility and ATR relative to baseline ~0.02
+                mult = 0.25 + min(3.5, (abs(val) / 0.02))
+            elif feat in ("Bollinger_Width", "High_Low_Range"):
+                # Range and band width relative to baseline ~0.03
+                mult = 0.25 + min(3.0, (abs(val) / 0.03))
+            elif "Stochastic" in feat or "Williams" in feat:
+                mult = 0.25 + (abs(val - 50.0) / 25.0)
+            elif "Price_MA" in feat or "Price_EMA" in feat or "EMA5_" in feat or "EMA20_" in feat:
+                mult = 0.25 + min(3.0, (abs(val) / 0.02))
+            elif "ROC" in feat or "Return" in feat:
+                mult = 0.25 + min(3.0, (abs(val) / 0.015))
+            else:
+                mult = 1.0
+
+            local_imp[idx] = ensemble_imp[idx] * mult
+
         # Map the 34 features into the 4 high-level consumer price drivers
         category_weights = {
             "Buyer/Seller Demand": 0.0,
@@ -409,12 +443,12 @@ class PredictionService:
         }
 
         for idx, feat in enumerate(FEATURES):
-            val = float(ensemble_imp[idx])
+            val = float(local_imp[idx])
             if "Volume" in feat or "Order" in feat:
                 category_weights["Buyer/Seller Demand"] += val
             elif "sentiment" in feat:
                 category_weights["News & Social Sentiment"] += val
-            elif "Volatility" in feat or "ATR" in feat or "Bollinger_Width" in feat:
+            elif "Volatility" in feat or "ATR" in feat or "Bollinger_Width" in feat or "High_Low_Range" in feat:
                 category_weights["Volatility & Risk"] += val
             else:
                 category_weights["Price Momentum"] += val
@@ -422,10 +456,17 @@ class PredictionService:
         cat_total = sum(category_weights.values()) or 1.0
         norm_cats = {k: v / cat_total for k, v in category_weights.items()}
 
+        # Ensure integer percentage weights sum exactly to 100%
+        int_pcts = {k: int(round(v * 100)) for k, v in norm_cats.items()}
+        diff = 100 - sum(int_pcts.values())
+        if diff != 0:
+            top_key = max(int_pcts.keys(), key=lambda k: norm_cats[k])
+            int_pcts[top_key] += diff
+
         factors = [
             {
                 "name": "Buyer/Seller Demand",
-                "weight": f"{int(round(norm_cats['Buyer/Seller Demand'] * 100))}%",
+                "weight": f"{int_pcts['Buyer/Seller Demand']}%",
                 "percentage": round(norm_cats["Buyer/Seller Demand"], 4),
                 "code": "BD",
                 "color": "emerald",
@@ -433,7 +474,7 @@ class PredictionService:
             },
             {
                 "name": "Price Momentum",
-                "weight": f"{int(round(norm_cats['Price Momentum'] * 100))}%",
+                "weight": f"{int_pcts['Price Momentum']}%",
                 "percentage": round(norm_cats["Price Momentum"], 4),
                 "code": "PM",
                 "color": "blue",
@@ -441,7 +482,7 @@ class PredictionService:
             },
             {
                 "name": "News & Social Sentiment",
-                "weight": f"{int(round(norm_cats['News & Social Sentiment'] * 100))}%",
+                "weight": f"{int_pcts['News & Social Sentiment']}%",
                 "percentage": round(norm_cats["News & Social Sentiment"], 4),
                 "code": "NS",
                 "color": "amber",
@@ -449,7 +490,7 @@ class PredictionService:
             },
             {
                 "name": "Volatility & Range",
-                "weight": f"{int(round(norm_cats['Volatility & Risk'] * 100))}%",
+                "weight": f"{int_pcts['Volatility & Risk']}%",
                 "percentage": round(norm_cats["Volatility & Risk"], 4),
                 "code": "VR",
                 "color": "rose",

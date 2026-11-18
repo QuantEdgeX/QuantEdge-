@@ -54,7 +54,8 @@ import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import concurrent.futures
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 if _REPO_ROOT not in sys.path:
@@ -66,6 +67,8 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
+_INFERENCE_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=6)
 
 
 # ============================================================================
@@ -1238,9 +1241,76 @@ def _option_text(question: Dict[str, Any], option_id: str) -> str:
     return ""
 
 
-    # ============================================================================
-    # PYDANTIC MODELS
-    # ============================================================================
+# ============================================================================
+# IN-MEMORY LESSON PREFETCH CACHE & BACKGROUND PRE-WARM
+# ============================================================================
+
+_PREFETCH_LESSON_CACHE: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+async def _prewarm_lesson_for_user(user_id: str, topic_id: Optional[str] = None) -> None:
+    """
+    Asynchronously pre-generates the next unlocked topic's 10-question lesson
+    in a background thread so tapping Start Lesson returns immediately (<100ms).
+    """
+    if not _groq_client:
+        return
+    try:
+        profile = _get_profile(user_id)
+        if topic_id:
+            topic = _find_topic(topic_id)
+        else:
+            topic = _current_topic(profile)
+        if not topic:
+            return
+
+        score = profile.get("score", 1)
+        difficulty = _difficulty_for_score(score)
+        cache_key = (user_id, topic["id"], difficulty)
+        if cache_key in _PREFETCH_LESSON_CACHE:
+            return
+
+        plan = _build_lesson_plan(topic, difficulty)
+        history = list(_topic_history(profile, topic["id"]))
+        questions = []
+        seen = []
+        for q_num in range(1, QUESTIONS_PER_LESSON + 1):
+            q = await _generate_question(
+                topic=topic,
+                score=score,
+                difficulty=difficulty,
+                question_number=q_num,
+                previous_questions=seen,
+                plan=plan[q_num - 1],
+                history=[h for h in history if h not in seen],
+            )
+            questions.append(q)
+            seen.append(q["prompt"])
+
+        _PREFETCH_LESSON_CACHE[cache_key] = {
+            "topic": topic,
+            "score": score,
+            "difficulty": difficulty,
+            "plan": plan,
+            "questions": questions,
+            "created_at": time.time(),
+        }
+        logger.info(
+            "Pre-warmed 10-question lesson for user=%s topic=%s difficulty=%s",
+            user_id,
+            topic["id"],
+            difficulty,
+        )
+    except Exception as exc:
+        logger.warning("Lesson prefetch background task failed for user %s: %s", user_id, exc)
+
+
+# ============================================================================
+# PYDANTIC MODELS
+# ============================================================================
+
+class LessonPrewarmRequest(BaseModel):
+    userId: str = Field(min_length=1)
+    topicId: Optional[str] = None
 
 class LessonStartRequest(BaseModel):
     userId: str = Field(min_length=1)
@@ -1303,6 +1373,8 @@ class PortfolioHoldingRequest(BaseModel):
 
 @app.get("/api/learning/topics")
 async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
+    if userId:
+        asyncio.create_task(_prewarm_lesson_for_user(userId))
     profile = _get_profile(userId) if userId else None
     current_index = profile["currentTopicIndex"] if profile else 0
     completed_topics = set(profile.get("completedTopics", [])) if profile else set()
@@ -1348,6 +1420,8 @@ async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
 
 @app.get("/api/learning/progress")
 async def get_learning_progress(userId: str) -> Dict[str, Any]:
+    if userId:
+        asyncio.create_task(_prewarm_lesson_for_user(userId))
     profile = _get_profile(userId)
     topic = _current_topic(profile)
     return {
@@ -1438,6 +1512,12 @@ async def complete_onboarding(req: OnboardingRequest) -> Dict[str, Any]:
     }
 
 
+@app.post("/api/learning/lesson/prewarm")
+async def prewarm_lesson(req: LessonPrewarmRequest) -> Dict[str, Any]:
+    asyncio.create_task(_prewarm_lesson_for_user(req.userId, req.topicId))
+    return {"status": "ok", "message": "Pre-warming lesson in background"}
+
+
 @app.post("/api/learning/lesson/start")
 async def start_lesson(req: LessonStartRequest) -> Dict[str, Any]:
     _purge_expired_sessions()
@@ -1470,18 +1550,30 @@ async def start_lesson(req: LessonStartRequest) -> Dict[str, Any]:
 
     score = profile["score"]
     difficulty = _difficulty_for_score(score)
-    plan = _build_lesson_plan(topic, difficulty)
-    history = list(_topic_history(profile, topic["id"]))
+    cache_key = (req.userId, topic["id"], difficulty)
+
+    prewarmed = _PREFETCH_LESSON_CACHE.pop(cache_key, None)
+    if prewarmed and prewarmed.get("questions"):
+        plan = prewarmed["plan"]
+        pre_questions = prewarmed["questions"]
+        first_question = pre_questions[0]
+        remaining_questions = list(pre_questions[1:])
+        logger.info("Serving pre-warmed lesson instantly (<100ms) for user=%s topic=%s", req.userId, topic["id"])
+    else:
+        plan = _build_lesson_plan(topic, difficulty)
+        history = list(_topic_history(profile, topic["id"]))
+        first_question = await _generate_question(
+            topic=topic,
+            score=score,
+            difficulty=difficulty,
+            question_number=1,
+            previous_questions=[],
+            plan=plan[0],
+            history=history,
+        )
+        remaining_questions = []
+
     lesson_id = f"lesson_{uuid.uuid4().hex[:12]}"
-    first_question = await _generate_question(
-        topic=topic,
-        score=score,
-        difficulty=difficulty,
-        question_number=1,
-        previous_questions=[],
-        plan=plan[0],
-        history=history,
-    )
 
     _LESSON_SESSIONS[lesson_id] = {
         "lessonId": lesson_id,
@@ -1493,6 +1585,7 @@ async def start_lesson(req: LessonStartRequest) -> Dict[str, Any]:
         "difficulty": difficulty,
         "plan": plan,
         "weakQueue": [],
+        "pregenerated_questions": remaining_questions,
         "questions": {first_question["questionId"]: first_question},
         "questionTexts": [first_question["prompt"]],
         "questionNumber": 1,
@@ -1574,30 +1667,34 @@ async def _process_answer(
             pending_weak_queue.append(focus)
 
     if question_number < QUESTIONS_PER_LESSON:
-        next_plan = dict(session["plan"][question_number])
         weak_focus = next(
             (focus for focus in pending_weak_queue if focus != question.get("focus")),
             None,
         )
-        if weak_focus:
-            pending_weak_queue.remove(weak_focus)
-            next_plan.update(
-                {
-                    "subtopic": weak_focus,
-                    "isReview": True,
-                    "angle": random.choice(QUESTION_ANGLES),
-                }
+        pregenerated = session.get("pregenerated_questions", [])
+        if not weak_focus and pregenerated:
+            next_question = pregenerated.pop(0)
+        else:
+            next_plan = dict(session["plan"][question_number])
+            if weak_focus:
+                pending_weak_queue.remove(weak_focus)
+                next_plan.update(
+                    {
+                        "subtopic": weak_focus,
+                        "isReview": True,
+                        "angle": random.choice(QUESTION_ANGLES),
+                    }
+                )
+            history = _topic_history(profile, topic["id"])
+            next_question = await _generate_question(
+                topic=topic,
+                score=session["scoreAtStart"],
+                difficulty=session["difficulty"],
+                question_number=question_number + 1,
+                previous_questions=session["questionTexts"],
+                plan=next_plan,
+                history=[item for item in history if item not in session["questionTexts"]],
             )
-        history = _topic_history(profile, topic["id"])
-        next_question = await _generate_question(
-            topic=topic,
-            score=session["scoreAtStart"],
-            difficulty=session["difficulty"],
-            question_number=question_number + 1,
-            previous_questions=session["questionTexts"],
-            plan=next_plan,
-            history=[item for item in history if item not in session["questionTexts"]],
-        )
 
     session["lastActivityEpoch"] = time.time()
     if is_correct:
@@ -1671,6 +1768,9 @@ async def _process_answer(
     profile["updatedAt"] = _now_iso()
     _save_progress(_PROGRESS_STORE)
     _drop_session(req.lessonId)
+
+    # Asynchronously pre-generate the next unlocked topic's lesson in background
+    asyncio.create_task(_prewarm_lesson_for_user(req.userId))
 
     mistakes = []
     weak_areas = []
@@ -2102,22 +2202,31 @@ async def search_tickers(q: str = "") -> List[Dict[str, Any]]:
     """
     query = (q or "").upper().strip()
     watchlist = ["NVDA", "AAPL", "TSLA", "MSFT", "AMD", "AMZN", "GOOGL", "META"]
+    matched = [
+        sym for sym in watchlist
+        if not query or query in sym or query in COMPANY_NAMES.get(sym, sym).upper()
+    ]
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(_INFERENCE_EXECUTOR, prediction_service.predict_ticker, sym)
+        for sym in matched
+    ]
+    predictions = await asyncio.gather(*tasks, return_exceptions=True)
+
     results = []
-    for sym in watchlist:
+    for sym, data in zip(matched, predictions):
         cname = COMPANY_NAMES.get(sym, sym)
-        if not query or query in sym or query in cname.upper():
-            try:
-                data = await asyncio.to_thread(prediction_service.predict_ticker, sym)
-                results.append({
-                    "ticker": sym,
-                    "name": data.get("companyName", cname),
-                    "price": data.get("currentPrice", 0.0),
-                    "changePercent": data.get("changePercent", 0.0),
-                    "signal": data.get("aiSignal", "BUY"),
-                    "exchange": "NASDAQ",
-                })
-            except Exception as exc:
-                logger.warning("Search lookup failed for %s: %s", sym, exc)
+        if isinstance(data, Exception):
+            logger.warning("Search lookup failed for %s: %s", sym, data)
+            continue
+        results.append({
+            "ticker": sym,
+            "name": data.get("companyName", cname),
+            "price": data.get("currentPrice", 0.0),
+            "changePercent": data.get("changePercent", 0.0),
+            "signal": data.get("aiSignal", "BUY"),
+            "exchange": "NASDAQ",
+        })
     return results
 
 
@@ -2149,21 +2258,34 @@ async def get_dashboard(userId: Optional[str] = None) -> Dict[str, Any]:
             "next_level_milestone": f"{(user_level + 1) * 1000} XP",
         }
 
-    equity_val = 0.0
-    daily_chg = 0.0
-
+    valid_items = []
     for item in holdings_spec:
         sym = item.get("ticker") or item.get("symbol")
-        qty = float(item.get("shares") if item.get("shares") is not None else item.get("quantity", 0))
+        if sym:
+            qty = float(item.get("shares") if item.get("shares") is not None else item.get("quantity", 0))
+            valid_items.append((sym.upper().strip(), qty))
+
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(_INFERENCE_EXECUTOR, prediction_service.predict_ticker, sym)
+        for sym, _ in valid_items
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    equity_val = 0.0
+    daily_chg = 0.0
+    for (sym, qty), res in zip(valid_items, results):
+        if isinstance(res, Exception):
+            logger.warning("Dashboard holding calculation error for %s: %s", sym, res)
+            continue
         try:
-            res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
             pct = res["changePercent"]
             prev = curr / (1.0 + pct / 100.0) if (1.0 + pct / 100.0) != 0 else curr
             equity_val += curr * qty
             daily_chg += (curr - prev) * qty
         except Exception as exc:
-            logger.warning("Dashboard holding calculation error for %s: %s", sym, exc)
+            logger.warning("Dashboard math error for %s: %s", sym, exc)
 
     total_portfolio_value = round(equity_val, 2)
     daily_change = round(daily_chg, 2)
@@ -2190,12 +2312,21 @@ _MARKET_TICKERS = ["NVDA", "AAPL", "TSLA", "MSFT", "AMD"]
 async def get_assets() -> List[Dict[str, Any]]:
     """
     Live market assets for the watchlist, powered by the 4-model ensemble.
-    No mock data or fake numbers.
+    No mock data or fake numbers. Concurrently executed via ThreadPoolExecutor.
     """
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(_INFERENCE_EXECUTOR, prediction_service.predict_ticker, sym)
+        for sym in _MARKET_TICKERS
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     assets = []
-    for sym in _MARKET_TICKERS:
+    for sym, res in zip(_MARKET_TICKERS, results):
+        if isinstance(res, Exception):
+            logger.error("Failed to generate live asset telemetry for %s: %s", sym, res)
+            continue
         try:
-            res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             assets.append({
                 "ticker": sym,
                 "status": res["aiSignal"],
@@ -2207,7 +2338,7 @@ async def get_assets() -> List[Dict[str, Any]]:
                 "insight": res["xaiInsight"],
             })
         except Exception as exc:
-            logger.error("Failed to generate live asset telemetry for %s: %s", sym, exc)
+            logger.error("Asset extraction error for %s: %s", sym, exc)
 
     if not assets:
         raise HTTPException(
@@ -2232,17 +2363,33 @@ async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
     if not holdings_spec:
         return []
 
-    items = []
-    equity_total = 0.0
-
+    valid_items = []
     for spec in holdings_spec:
-        sym = (spec.get("ticker") or spec.get("symbol") or "").upper()
+        sym = (spec.get("ticker") or spec.get("symbol") or "").upper().strip()
         if not sym:
             continue
         qty = float(spec.get("shares") if spec.get("shares") is not None else spec.get("quantity", 0))
         avg_p = float(spec.get("avgPrice") if spec.get("avgPrice") is not None else spec.get("avg_price", 0))
+        valid_items.append((sym, qty, avg_p, spec))
+
+    if not valid_items:
+        return []
+
+    loop = asyncio.get_running_loop()
+    tasks = [
+        loop.run_in_executor(_INFERENCE_EXECUTOR, prediction_service.predict_ticker, sym)
+        for sym, _, _, _ in valid_items
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    items = []
+    equity_total = 0.0
+
+    for (sym, qty, avg_p, spec), res in zip(valid_items, results):
+        if isinstance(res, Exception):
+            logger.error("Portfolio holding error for %s: %s", sym, res)
+            continue
         try:
-            res = await asyncio.to_thread(prediction_service.predict_ticker, sym)
             curr = res["currentPrice"]
             pct = res["changePercent"]
             prev = curr / (1.0 + pct / 100.0) if (1.0 + pct / 100.0) != 0 else curr
@@ -2264,7 +2411,7 @@ async def get_portfolio(userId: Optional[str] = None) -> List[Dict[str, Any]]:
                 "_raw_val": item_val,
             })
         except Exception as exc:
-            logger.error("Portfolio holding error for %s: %s", sym, exc)
+            logger.error("Portfolio holding math error for %s: %s", sym, exc)
 
     if not items:
         return []

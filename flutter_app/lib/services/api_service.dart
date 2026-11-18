@@ -45,7 +45,7 @@ class ApiService {
     try {
       final response = await http
           .get(Uri.parse('$baseUrl/api/assets'))
-          .timeout(const Duration(seconds: 4));
+          .timeout(const Duration(seconds: 10));
       if (response.statusCode == 200) {
         final List<dynamic> data = jsonDecode(response.body);
         return data.map((e) => MarketAsset.fromJson(e)).toList();
@@ -160,27 +160,24 @@ class ApiService {
   static final List<MarketAsset> _fallbackAssets = [
     MarketAsset(
       ticker: 'NVDA',
-      status: 'BUY',
-      confidence: '91%',
-      sentiment: '0.88',
-      insight:
-          'Current momentum is heavily supported by order book intensity. The model detects a strong decoupling from standard retail volatility, suggesting institutional accumulation.',
+      status: 'HOLD',
+      confidence: '50%',
+      sentiment: '0.00',
+      insight: 'Awaiting live 4-model ensemble telemetry...',
     ),
     MarketAsset(
       ticker: 'AAPL',
       status: 'HOLD',
-      confidence: '87%',
-      sentiment: '0.12',
-      insight:
-          'Current trends show the stock price is actively climbing, but the general mood seen online shows a sharp shift in trust. It is like a temporary disconnect between price and sentiment.',
+      confidence: '50%',
+      sentiment: '0.00',
+      insight: 'Awaiting live 4-model ensemble telemetry...',
     ),
     MarketAsset(
       ticker: 'TSLA',
-      status: 'SELL',
-      confidence: '82%',
-      sentiment: '-0.35',
-      insight:
-          'Bearish sentiment overrides the technical support levels. High-frequency social panic is outweighing the flat volume indicators, flagging a potential correction phase.',
+      status: 'HOLD',
+      confidence: '50%',
+      sentiment: '0.00',
+      insight: 'Awaiting live 4-model ensemble telemetry...',
     ),
   ];
 

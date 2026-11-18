@@ -464,6 +464,7 @@ class QuizProvider extends ChangeNotifier {
           .map((t) => LearningTopic.fromJson(t as Map<String, dynamic>))
           .toList();
       _learningProgress = LearningProgress.fromJson(results[1]);
+      unawaited(_learningService.prewarmLesson(userId));
     } catch (e) {
       _learningError = e.toString();
       if (_learningTopics.isEmpty) {
@@ -1068,19 +1069,44 @@ class QuizProvider extends ChangeNotifier {
 
   // ─── Ticker Detail ───────────────────────────────────────────────────────
 
-  Future<TickerDetail?> fetchTickerDetail(String ticker) async {
-    if (_tickerDetailCache.containsKey(ticker)) return _tickerDetailCache[ticker];
+  Future<TickerDetail?> fetchTickerDetail(String ticker, {bool forceRefresh = false}) async {
+    final symKey = ticker.toUpperCase().trim();
+    if (!forceRefresh && _tickerDetailCache.containsKey(symKey)) {
+      return _tickerDetailCache[symKey];
+    }
     _isLoadingTickerDetail = true;
     notifyListeners();
     try {
       final uri = Uri.parse(
-        '${ApiService.baseUrl}/api/tickers/$ticker/detail?xaiLevel=$_userLevel',
+        '${ApiService.baseUrl}/api/tickers/$symKey/detail?xaiLevel=$_userLevel',
       );
       final response = await http.get(uri).timeout(const Duration(seconds: 15));
       if (response.statusCode == 200) {
         final detail = TickerDetail.fromJson(
             jsonDecode(response.body) as Map<String, dynamic>);
-        _tickerDetailCache[ticker] = detail;
+        _tickerDetailCache[symKey] = detail;
+
+        // Propagate live updated signal, confidence, sentiment immediately to _marketAssets
+        final updatedAsset = MarketAsset(
+          ticker: detail.ticker,
+          status: detail.aiSignal,
+          confidence: '${(detail.aiConfidence * 100).toInt()}%',
+          sentiment: detail.sentimentScore.toStringAsFixed(2),
+          insight: detail.xaiInsight,
+          rsi: detail.rsi,
+          price: detail.currentPrice,
+          changePercent: detail.changePercent,
+        );
+
+        final idx = _marketAssets.indexWhere(
+          (a) => a.ticker.toUpperCase() == symKey,
+        );
+        if (idx >= 0) {
+          _marketAssets[idx] = updatedAsset;
+        } else {
+          _marketAssets.add(updatedAsset);
+        }
+
         _isLoadingTickerDetail = false;
         notifyListeners();
         return detail;
