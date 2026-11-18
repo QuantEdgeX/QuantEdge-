@@ -115,7 +115,7 @@ _GROQ_KEY = os.getenv("GROQ_API_KEY", "").strip()
 _GROQ_MODEL = "openai/gpt-oss-20b"
 
 _groq_client = (
-    Groq(api_key=_GROQ_KEY)
+    Groq(api_key=_GROQ_KEY, max_retries=0)
     if _GROQ_KEY
     else None
 )
@@ -1003,112 +1003,52 @@ def _build_question_prompt(
     history: List[str],
     attempt: int,
 ) -> str:
-    score_name = _score_name(score)
     difficulty = plan["difficulty"]
-    difficulty_description = _difficulty_description(difficulty)
-    subtopics = ", ".join(topic["topics"])
 
-    in_lesson = "\n".join(f"- {q}" for q in previous_questions) or "None"
+    # Keep only the last 3-4 prompt summaries to prevent duplication without token bloat
+    seen = (previous_questions[-3:] + [q for q in history[-4:] if q not in previous_questions])[:5]
+    avoid_list = "; ".join(f'"{q[:60]}"' for q in seen) if seen else "None"
 
-    older = [q for q in history[-HISTORY_IN_PROMPT:] if q not in previous_questions]
-    from_history = "\n".join(f"- {q}" for q in older) or "None"
-
-    review_note = (
-        "This is a REVIEW question: the learner just answered this subtopic "
-        "incorrectly. Test the SAME underlying idea from a different angle "
-        "with different wording and a different example.\n"
+    review_clause = (
+        "Focus on reviewing the missed concept with fresh wording and examples. "
         if plan.get("isReview")
         else ""
     )
-
-    retry_note = (
-        "\nYour previous attempt was rejected as invalid or too similar to an "
-        "existing question. Write a clearly DIFFERENT question this time.\n"
+    retry_clause = (
+        "Previous attempt was invalid or duplicate. Generate a clearly distinct question. "
         if attempt > 0
         else ""
     )
 
-    return f"""
-    You are the QuantEdge Learning Engine.
+    return f"""Generate 1 multiple-choice stock-market learning question (JSON only).
+Topic: {topic['title']} | Subtopic: {plan['subtopic']} | Level: {difficulty} (Score: {score}/10)
+Type: {plan['qtype']} ({TYPE_GUIDANCE.get(plan['qtype'], 'Conceptual')}) | Angle: {plan['angle']}
+{review_clause}{retry_clause}Avoid repeating recent questions: {avoid_list}
 
-    Generate ONE high-quality educational multiple-choice question for a
-    stock-market learning app inspired by Duolingo. The learner must be able to go
-    from complete beginner to expert through these questions, so every question
-    should teach something as well as test it.
-
-    LEARNER
-    - Score: {score}/10 ({score_name})
-    - Difficulty for THIS question: {difficulty}
-    - Difficulty description: {difficulty_description}
-    - Audience note: {_audience_note(score)}
-
-    CURRENT LESSON
-    - Topic: {topic["title"]}
-    - Topic description: {topic["description"]}
-    - All subtopics of this topic: {subtopics}
-    - Question number: {question_number}/{QUESTIONS_PER_LESSON}
-
-    THIS QUESTION MUST FOLLOW THIS PLAN
-    - Subtopic focus: {plan["subtopic"]}
-    - Question style: {plan["qtype"]} -> {TYPE_GUIDANCE[plan["qtype"]]}
-    - Angle: {plan["angle"]}
-    (If the style truly does not fit the subtopic, use CONCEPT or SCENARIO and set
-    "type" accordingly.)
-    {review_note}{retry_note}
-    QUESTIONS ALREADY ASKED IN THIS LESSON (never repeat or paraphrase):
-        {in_lesson}
-
-        QUESTIONS THE LEARNER HAS SEEN IN EARLIER ATTEMPTS OF THIS TOPIC
-        (do NOT reuse the same idea, scenario, numbers or wording):
-            {from_history}
-
-            QUALITY RULES
-            1. The question MUST teach or test stock-market/investing knowledge.
-            2. Stay within the topic, centred on the subtopic focus above.
-            3. Match the requested difficulty exactly - not easier, not harder.
-            4. Never repeat or closely paraphrase any question listed above.
-            5. Use varied, concrete examples. Realistic stock examples (AAPL, MSFT, NVDA,
-            TSLA, AMZN, GOOGL, META, AMD, SPY) are fine; use plausible numbers but never
-            present them as current real-time market data.
-            6. Exactly FOUR options with ids A, B, C, D and exactly ONE correct answer.
-            7. Distractors must be plausible and based on real misconceptions, but wrong
-            after careful reasoning. Keep all options similar in length and style so the
-            correct one is not obvious from its length.
-            8. Do NOT use "all of the above", "none of the above" or "A and B" options.
-            9. Do NOT refer to options by letter inside the prompt or explanation.
-            10. No real-time stock predictions, no personalised financial advice, no
-            trading recommendations.
-            11. The question must be factually correct and unambiguous. For calculations,
-            verify the arithmetic.
-            12. Keep the question concise. The explanation must say why the right answer is
-            right AND briefly why the most tempting wrong answer is wrong.
-            13. "learningTip" is one short memorable takeaway.
-            14. Return ONLY valid JSON. No markdown, no code fences, complete and closed.
-
-            RETURN THIS EXACT STRUCTURE:
-
-                {{
-                    "prompt": "Question text",
-                    "contextBlurb": "Optional short scenario or learning context (may be empty)",
-                    "type": "CONCEPT",
-                    "options": [
-                        {{"id": "A", "text": "Option A"}},
-                        {{"id": "B", "text": "Option B"}},
-                        {{"id": "C", "text": "Option C"}},
-                        {{"id": "D", "text": "Option D"}}
-                    ],
-                    "correctOptionId": "A",
-                    "explanation": "Why the correct answer is correct.",
-                    "learningTip": "One short takeaway."
-                }}
-
-                The "type" must be exactly one of: CONCEPT, SCENARIO, CALCULATION, CHART, COMPARISON
-                """
+RULES:
+1. Accurate, realistic investing scenario (e.g. AAPL, NVDA, MSFT, SPY).
+2. Exactly 4 options (A, B, C, D) with 1 unambiguously correct answer. Keep option lengths balanced.
+3. Concise 1-2 sentence "explanation" (why correct answer is right and why key distractor is wrong).
+4. Concise 1 sentence "learningTip" (memorable takeaway).
+5. Output ONLY valid JSON:
+{{
+  "prompt": "Question text",
+  "contextBlurb": "Short scenario/context or empty",
+  "type": "{plan['qtype']}",
+  "options": [
+    {{"id": "A", "text": "Option 1"}},
+    {{"id": "B", "text": "Option 2"}},
+    {{"id": "C", "text": "Option 3"}},
+    {{"id": "D", "text": "Option 4"}}
+  ],
+  "correctOptionId": "A",
+  "explanation": "Concise 1-2 sentence explanation.",
+  "learningTip": "Concise 1 sentence takeaway."
+}}"""
 
 
 def _call_groq(prompt: str) -> str:
-    """Blocking Groq call (run via asyncio.to_thread)."""
-
+    """Blocking Groq call using openai/gpt-oss-20b (run via asyncio.to_thread)."""
     response = _groq_client.chat.completions.create(
         model=_GROQ_MODEL,
         messages=[
@@ -1116,9 +1056,8 @@ def _call_groq(prompt: str) -> str:
                 "role": "system",
                 "content": (
                     "You are an expert stock-market educator. "
-                    "Generate accurate, engaging educational questions that "
-                    "match the learner's level. Return ONLY valid JSON. "
-                    "Do not use markdown or code fences."
+                    "Generate accurate, engaging educational questions. "
+                    "Return ONLY valid JSON. Keep explanations concise (1-2 sentences)."
                 ),
             },
             {
@@ -1127,12 +1066,66 @@ def _call_groq(prompt: str) -> str:
             },
         ],
         temperature=0.7,
-        max_completion_tokens=2000,
+        max_tokens=1500,
         reasoning_effort="low",
         response_format={"type": "json_object"},
     )
-
     return response.choices[0].message.content or ""
+
+
+def _call_gemini_flash(prompt: str) -> str:
+    """Zero-stall fallback call to gemini-2.5-flash when Groq hits 429 TPM limits."""
+    if not _gemini_client:
+        raise RuntimeError("Gemini client is not configured for fallback.")
+    response = _gemini_client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt,
+    )
+    return response.text or ""
+
+
+def _call_question_llm(prompt: str) -> Tuple[str, str]:
+    """
+    Primary: openai/gpt-oss-20b via Groq with max_retries=0.
+    Immediate failover on 429 / RateLimitError to gemini-2.5-flash (0ms wait).
+    Returns (raw_json_str, model_name).
+    """
+    if _groq_client:
+        try:
+            raw = _call_groq(prompt)
+            return raw, _GROQ_MODEL
+        except Exception as exc:
+            err_str = str(exc).lower()
+            is_429 = "429" in err_str or "rate limit" in err_str or "ratelimit" in err_str
+            if is_429:
+                logger.warning(
+                    "Groq 429 TPM rate limit hit on %s. Failing over immediately (0ms wait) to gemini-2.5-flash: %s",
+                    _GROQ_MODEL,
+                    exc,
+                )
+            else:
+                logger.warning(
+                    "Groq call failed on %s (%s). Failing over to gemini-2.5-flash",
+                    _GROQ_MODEL,
+                    exc,
+                )
+
+            if _gemini_client:
+                try:
+                    raw = _call_gemini_flash(prompt)
+                    return raw, "gemini-2.5-flash"
+                except Exception as g_exc:
+                    logger.error("Gemini fallback also failed: %s", g_exc)
+            raise exc
+
+    if _gemini_client:
+        raw = _call_gemini_flash(prompt)
+        return raw, "gemini-2.5-flash"
+
+    raise HTTPException(
+        status_code=503,
+        detail="Neither Groq nor Gemini is configured for question generation.",
+    )
 
 
 async def _generate_question(
@@ -1146,21 +1139,8 @@ async def _generate_question(
 ) -> Dict[str, Any]:
     """
     Generate one validated, non-duplicate question.
-
-    Retries up to MAX_GENERATION_ATTEMPTS times when the model returns invalid
-    JSON, a malformed question, or a question that is too similar to anything
-    the learner has already seen in this lesson or earlier attempts.
+    Uses openai/gpt-oss-20b on Groq with instant failover to gemini-2.5-flash on 429.
     """
-
-    if not _groq_client:
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "Groq is not configured. "
-                "Set GROQ_API_KEY in backend/.env before starting lessons."
-            ),
-        )
-
     history = history or []
     if plan is None:
         plan = {
@@ -1184,9 +1164,11 @@ async def _generate_question(
             attempt=attempt,
         )
         try:
-            raw = await asyncio.to_thread(_call_groq, prompt)
+            raw, model_used = await asyncio.to_thread(_call_question_llm, prompt)
             data = json.loads(_clean_json_response(raw))
             question = _validate_and_shape_question(data, plan, topic, score)
+            question["model"] = model_used
+            question["generatedBy"] = "groq" if "gpt-oss" in model_used else "gemini"
             if _is_duplicate(question["prompt"], seen):
                 raise ValueError("Question is too similar to a previous one.")
             return question
@@ -1204,10 +1186,10 @@ async def _generate_question(
                 "qtype": random.choice(QUESTION_TYPES),
             }
 
-    logger.error("Groq question generation failed: %s", last_error)
+    logger.error("Question generation failed across all attempts: %s", last_error)
     raise HTTPException(
         status_code=502,
-        detail="The learning engine could not generate a question using the Groq LLM.",
+        detail="The learning engine could not generate a question using the configured LLMs.",
     )
 
 
@@ -1373,8 +1355,6 @@ class PortfolioHoldingRequest(BaseModel):
 
 @app.get("/api/learning/topics")
 async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
-    if userId:
-        asyncio.create_task(_prewarm_lesson_for_user(userId))
     profile = _get_profile(userId) if userId else None
     current_index = profile["currentTopicIndex"] if profile else 0
     completed_topics = set(profile.get("completedTopics", [])) if profile else set()
@@ -1420,8 +1400,6 @@ async def get_learning_topics(userId: Optional[str] = None) -> Dict[str, Any]:
 
 @app.get("/api/learning/progress")
 async def get_learning_progress(userId: str) -> Dict[str, Any]:
-    if userId:
-        asyncio.create_task(_prewarm_lesson_for_user(userId))
     profile = _get_profile(userId)
     topic = _current_topic(profile)
     return {
@@ -1768,9 +1746,6 @@ async def _process_answer(
     profile["updatedAt"] = _now_iso()
     _save_progress(_PROGRESS_STORE)
     _drop_session(req.lessonId)
-
-    # Asynchronously pre-generate the next unlocked topic's lesson in background
-    asyncio.create_task(_prewarm_lesson_for_user(req.userId))
 
     mistakes = []
     weak_areas = []

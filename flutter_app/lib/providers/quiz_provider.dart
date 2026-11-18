@@ -464,7 +464,6 @@ class QuizProvider extends ChangeNotifier {
           .map((t) => LearningTopic.fromJson(t as Map<String, dynamic>))
           .toList();
       _learningProgress = LearningProgress.fromJson(results[1]);
-      unawaited(_learningService.prewarmLesson(userId));
     } catch (e) {
       _learningError = e.toString();
       if (_learningTopics.isEmpty) {
