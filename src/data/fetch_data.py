@@ -1,7 +1,7 @@
 import yfinance as yf
 import pandas as pd
 
-def fetch_stock_data(tickers, start="2020-01-01", end=None):
+def fetch_stock_data(tickers, start="2018-01-01", end="2026-01-01"):
     all_data = []
 
     for ticker in tickers:
@@ -23,10 +23,76 @@ def fetch_stock_data(tickers, start="2020-01-01", end=None):
     return final_df
 
 if __name__ == "__main__":
-    tickers = ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN", "META", "NVDA", "NFLX", "AMD", "JPM"]
+    tickers = [
+        # Technology
+        "AAPL",
+        "MSFT",
+        "NVDA",
+        "AMD",
+        "AVGO",
+        "ORCL",
+        "CSCO",
+        "ADBE",
 
+        # Communication Services
+        "GOOGL",
+        "META",
+        "NFLX",
+        "DIS",
+        "CMCSA",
+
+        # Consumer Discretionary
+        "AMZN",
+        "TSLA",
+        "HD",
+        "MCD",
+        "NKE",
+        "LOW",
+
+        # Financials
+        "JPM",
+        "BAC",
+        "GS",
+        "V",
+        "MA",
+        "WFC",
+        "C",
+        
+        # Healthcare
+        "JNJ",
+        "UNH",
+        "LLY",
+        "PFE",
+        "ABBV",
+        "MRK",
+
+        # Industrials
+        "CAT",
+        "BA",
+        "GE",
+        "HON",
+        "UPS",
+        "RTX",
+
+        # Consumer Staples
+        "WMT",
+        "PG",
+        "KO",
+        "PEP",
+        "COST",
+
+        # Energy
+        "XOM",
+        "CVX",
+        "COP",
+
+        # Utilities
+        "NEE",
+        "DUK"
+    ]
     data = fetch_stock_data(tickers)
 
     data.to_csv("src/data/stock_data.csv", index=False)
 
     print("Multi-stock data saved!")
+    

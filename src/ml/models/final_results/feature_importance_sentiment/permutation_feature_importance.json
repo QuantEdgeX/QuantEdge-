@@ -1,0 +1,874 @@
+{
+  "experiment": "Permutation feature importance",
+  "feature_count": 34,
+  "features": [
+    "Return",
+    "Return_3D",
+    "Return_5D",
+    "Return_10D",
+    "ROC_20",
+    "Price_MA5_Ratio",
+    "Price_MA10_Ratio",
+    "Price_EMA20_Ratio",
+    "Price_EMA50_Ratio",
+    "EMA5_EMA20_Ratio",
+    "EMA20_EMA50_Ratio",
+    "RSI",
+    "RSI_Lag1",
+    "Stochastic_K_14",
+    "Stochastic_D_3",
+    "Williams_R_14",
+    "ADX14",
+    "ATR14_Ratio",
+    "Volatility",
+    "Volatility_10",
+    "Volatility_20",
+    "Bollinger_Position",
+    "Bollinger_Width",
+    "High_Low_Range",
+    "Candle_Body",
+    "Gap_Return",
+    "Volume_Change",
+    "Volume_Ratio",
+    "Volume_Ratio_20",
+    "Volume_ROC_10",
+    "Return_Lag1",
+    "Return_Lag5",
+    "MACD_Hist_Lag1",
+    "sentiment_score"
+  ],
+  "models": [
+    "CatBoost",
+    "LightGBM",
+    "XGBoost"
+  ],
+  "scoring": "balanced_accuracy",
+  "repeats": 10,
+  "random_state": 42,
+  "feature_set": "34_features_with_sentiment",
+  "sentiment_feature": "sentiment_score",
+  "test_set_used": false,
+  "production_artifacts_modified": false,
+  "ensemble_weights_changed": false,
+  "decision_thresholds_changed": false,
+  "train_rows": 39936,
+  "validation_rows": 8181,
+  "results": [
+    {
+      "model": "CatBoost",
+      "feature": "Volatility",
+      "importance_mean": 0.008814651598968937,
+      "importance_std": 0.0026579229239469377,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 1
+    },
+    {
+      "model": "CatBoost",
+      "feature": "ATR14_Ratio",
+      "importance_mean": 0.00686164520137037,
+      "importance_std": 0.0024554800779525944,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 2
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Stochastic_K_14",
+      "importance_mean": 0.006024602725134376,
+      "importance_std": 0.0022111187674685126,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 3
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Bollinger_Width",
+      "importance_mean": 0.005859351167366134,
+      "importance_std": 0.002620202747707084,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 4
+    },
+    {
+      "model": "CatBoost",
+      "feature": "ROC_20",
+      "importance_mean": 0.005379890164867507,
+      "importance_std": 0.0016997243205229514,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 5
+    },
+    {
+      "model": "CatBoost",
+      "feature": "EMA5_EMA20_Ratio",
+      "importance_mean": 0.005120429607394272,
+      "importance_std": 0.002264197468411405,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 6
+    },
+    {
+      "model": "CatBoost",
+      "feature": "RSI",
+      "importance_mean": 0.0050081952857457205,
+      "importance_std": 0.0018333607341333269,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 7
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Stochastic_D_3",
+      "importance_mean": 0.004979286581264819,
+      "importance_std": 0.0014415008058125667,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 8
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return_5D",
+      "importance_mean": 0.0044573418060421255,
+      "importance_std": 0.0014528105469413415,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 9
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volatility_10",
+      "importance_mean": 0.004390731557107841,
+      "importance_std": 0.002646166799192171,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 10
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volatility_20",
+      "importance_mean": 0.003465509457147964,
+      "importance_std": 0.0022290923173129396,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 11
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volume_Ratio_20",
+      "importance_mean": 0.003284870429427911,
+      "importance_std": 0.001983418252176896,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 12
+    },
+    {
+      "model": "CatBoost",
+      "feature": "MACD_Hist_Lag1",
+      "importance_mean": 0.0032600171980771584,
+      "importance_std": 0.0033696488501660225,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 13
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Candle_Body",
+      "importance_mean": 0.0031352306487536508,
+      "importance_std": 0.0017127124985780464,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 14
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Price_MA5_Ratio",
+      "importance_mean": 0.0031318211801929065,
+      "importance_std": 0.0021137997104434514,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 15
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volume_Ratio",
+      "importance_mean": 0.002702954896678722,
+      "importance_std": 0.0023780623550333137,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 16
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return_10D",
+      "importance_mean": 0.0024747806993932198,
+      "importance_std": 0.00279021004122212,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 17
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Price_EMA20_Ratio",
+      "importance_mean": 0.0022515143423780916,
+      "importance_std": 0.001290419363612844,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 18
+    },
+    {
+      "model": "CatBoost",
+      "feature": "ADX14",
+      "importance_mean": 0.00198846487063038,
+      "importance_std": 0.001417908283268841,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 19
+    },
+    {
+      "model": "CatBoost",
+      "feature": "RSI_Lag1",
+      "importance_mean": 0.001874965456700084,
+      "importance_std": 0.0013233373150650562,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 20
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Price_EMA50_Ratio",
+      "importance_mean": 0.0018001814555056895,
+      "importance_std": 0.0020516806444602705,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 21
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Price_MA10_Ratio",
+      "importance_mean": 0.0015130772858332863,
+      "importance_std": 0.0016520700339654525,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 22
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return_Lag1",
+      "importance_mean": 0.0014971155895975863,
+      "importance_std": 0.0010992903000194313,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 23
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volume_ROC_10",
+      "importance_mean": 0.0012207063844631438,
+      "importance_std": 0.0014201734629251698,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 24
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return",
+      "importance_mean": 0.000982294809209705,
+      "importance_std": 0.0013477888468261057,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 25
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return_3D",
+      "importance_mean": 0.0009371103784940549,
+      "importance_std": 0.001811948691147546,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 26
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Bollinger_Position",
+      "importance_mean": 0.0009284610950925698,
+      "importance_std": 0.0016998456383481575,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 27
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Volume_Change",
+      "importance_mean": 0.0009219113265416135,
+      "importance_std": 0.0017653318509943587,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 28
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Return_Lag5",
+      "importance_mean": 0.0007958866017934274,
+      "importance_std": 0.0018483743040321728,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 29
+    },
+    {
+      "model": "CatBoost",
+      "feature": "sentiment_score",
+      "importance_mean": 0.0005065573052708827,
+      "importance_std": 0.0009263885707891486,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 30
+    },
+    {
+      "model": "CatBoost",
+      "feature": "High_Low_Range",
+      "importance_mean": 0.00046447728540263136,
+      "importance_std": 0.001068238167816766,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 31
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Williams_R_14",
+      "importance_mean": 0.0,
+      "importance_std": 0.0,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 32
+    },
+    {
+      "model": "CatBoost",
+      "feature": "Gap_Return",
+      "importance_mean": -0.0008068866240447559,
+      "importance_std": 0.001161468547570254,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 33
+    },
+    {
+      "model": "CatBoost",
+      "feature": "EMA20_EMA50_Ratio",
+      "importance_mean": -0.0022060607430918976,
+      "importance_std": 0.0032149467872155755,
+      "baseline_balanced_accuracy": 0.5234211648323726,
+      "importance_rank": 34
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volatility",
+      "importance_mean": 0.010918401368381214,
+      "importance_std": 0.0030895731985004066,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 1
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volatility_10",
+      "importance_mean": 0.0068378865888733655,
+      "importance_std": 0.0037756169041878746,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 2
+    },
+    {
+      "model": "LightGBM",
+      "feature": "EMA5_EMA20_Ratio",
+      "importance_mean": 0.005539264875511307,
+      "importance_std": 0.0023758853952107403,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 3
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Price_MA5_Ratio",
+      "importance_mean": 0.0049540924030580195,
+      "importance_std": 0.0018387823725454844,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 4
+    },
+    {
+      "model": "LightGBM",
+      "feature": "MACD_Hist_Lag1",
+      "importance_mean": 0.004512575196726309,
+      "importance_std": 0.0027142171365447097,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 5
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volatility_20",
+      "importance_mean": 0.0044866811802359964,
+      "importance_std": 0.002693300855669641,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 6
+    },
+    {
+      "model": "LightGBM",
+      "feature": "RSI",
+      "importance_mean": 0.004108418587991891,
+      "importance_std": 0.001996752090510467,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 7
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Stochastic_D_3",
+      "importance_mean": 0.003982680976385644,
+      "importance_std": 0.0017425243506157156,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 8
+    },
+    {
+      "model": "LightGBM",
+      "feature": "ADX14",
+      "importance_mean": 0.003460251697735883,
+      "importance_std": 0.003523190820564649,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 9
+    },
+    {
+      "model": "LightGBM",
+      "feature": "ATR14_Ratio",
+      "importance_mean": 0.0030233821353896294,
+      "importance_std": 0.0030714682788117744,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 10
+    },
+    {
+      "model": "LightGBM",
+      "feature": "EMA20_EMA50_Ratio",
+      "importance_mean": 0.002803812360077185,
+      "importance_std": 0.0030642712062565925,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 11
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return_5D",
+      "importance_mean": 0.0025763290287895368,
+      "importance_std": 0.0016734073940585128,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 12
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volume_Ratio_20",
+      "importance_mean": 0.0023719493331438414,
+      "importance_std": 0.0015783575019614178,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 13
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Stochastic_K_14",
+      "importance_mean": 0.0018676889330085822,
+      "importance_std": 0.0011069275581438742,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 14
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volume_ROC_10",
+      "importance_mean": 0.0016785262338866568,
+      "importance_std": 0.0011074431135807993,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 15
+    },
+    {
+      "model": "LightGBM",
+      "feature": "ROC_20",
+      "importance_mean": 0.0012803003059908224,
+      "importance_std": 0.002998536801972364,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 16
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volume_Ratio",
+      "importance_mean": 0.0011732519654689133,
+      "importance_std": 0.001354658381457087,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 17
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return_10D",
+      "importance_mean": 0.0011613457423633178,
+      "importance_std": 0.0025923223430856157,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 18
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Price_EMA50_Ratio",
+      "importance_mean": 0.0011562853732362877,
+      "importance_std": 0.0028577589344103696,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 19
+    },
+    {
+      "model": "LightGBM",
+      "feature": "RSI_Lag1",
+      "importance_mean": 0.0009493306315986438,
+      "importance_std": 0.00203344371798504,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 20
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return_Lag5",
+      "importance_mean": 0.0008785662143916739,
+      "importance_std": 0.0019383822106479398,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 21
+    },
+    {
+      "model": "LightGBM",
+      "feature": "High_Low_Range",
+      "importance_mean": 0.0008407031687959532,
+      "importance_std": 0.001444206526228719,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 22
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Price_MA10_Ratio",
+      "importance_mean": 0.0007533310507838676,
+      "importance_std": 0.0014938111659505066,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 23
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Volume_Change",
+      "importance_mean": 0.0006778292667345531,
+      "importance_std": 0.000992530512993605,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 24
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Williams_R_14",
+      "importance_mean": 0.0006102320663748273,
+      "importance_std": 0.0010546295417467495,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 25
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return",
+      "importance_mean": 0.0005115728129694519,
+      "importance_std": 0.0011517441760220837,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 26
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Price_EMA20_Ratio",
+      "importance_mean": 0.0004282023343733954,
+      "importance_std": 0.0010706775850270003,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 27
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Candle_Body",
+      "importance_mean": 0.00023131449727563646,
+      "importance_std": 0.0013759969192147547,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 28
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return_Lag1",
+      "importance_mean": 0.00022882917414056568,
+      "importance_std": 0.0016447603852189387,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 29
+    },
+    {
+      "model": "LightGBM",
+      "feature": "sentiment_score",
+      "importance_mean": -0.000857606955028778,
+      "importance_std": 0.001022691462525222,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 30
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Return_3D",
+      "importance_mean": -0.0014184286441297211,
+      "importance_std": 0.0014268800976361027,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 31
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Gap_Return",
+      "importance_mean": -0.0014403748549181804,
+      "importance_std": 0.0016629619431393187,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 32
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Bollinger_Width",
+      "importance_mean": -0.0030064155431570594,
+      "importance_std": 0.004776114689523745,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 33
+    },
+    {
+      "model": "LightGBM",
+      "feature": "Bollinger_Position",
+      "importance_mean": -0.003615606824392259,
+      "importance_std": 0.0017385653183210352,
+      "baseline_balanced_accuracy": 0.5233502837754517,
+      "importance_rank": 34
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volatility",
+      "importance_mean": 0.009876638249643488,
+      "importance_std": 0.0027506456435503726,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 1
+    },
+    {
+      "model": "XGBoost",
+      "feature": "RSI",
+      "importance_mean": 0.006050810771623805,
+      "importance_std": 0.0015341821861742343,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 2
+    },
+    {
+      "model": "XGBoost",
+      "feature": "MACD_Hist_Lag1",
+      "importance_mean": 0.0058899735784131435,
+      "importance_std": 0.002109805030738971,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 3
+    },
+    {
+      "model": "XGBoost",
+      "feature": "EMA5_EMA20_Ratio",
+      "importance_mean": 0.005088246018637976,
+      "importance_std": 0.0026858877427118296,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 4
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Price_EMA50_Ratio",
+      "importance_mean": 0.00452227423755317,
+      "importance_std": 0.001109010832041484,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 5
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Stochastic_D_3",
+      "importance_mean": 0.004444870328938399,
+      "importance_std": 0.0014589998036540323,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 6
+    },
+    {
+      "model": "XGBoost",
+      "feature": "EMA20_EMA50_Ratio",
+      "importance_mean": 0.004341455764119384,
+      "importance_std": 0.002460167425627952,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 7
+    },
+    {
+      "model": "XGBoost",
+      "feature": "ADX14",
+      "importance_mean": 0.0035286294869504185,
+      "importance_std": 0.0021407273384835765,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 8
+    },
+    {
+      "model": "XGBoost",
+      "feature": "ATR14_Ratio",
+      "importance_mean": 0.003516364372417391,
+      "importance_std": 0.002035645958433171,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 9
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Stochastic_K_14",
+      "importance_mean": 0.0034018421179188517,
+      "importance_std": 0.0010068068150919935,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 10
+    },
+    {
+      "model": "XGBoost",
+      "feature": "RSI_Lag1",
+      "importance_mean": 0.0031983686231274676,
+      "importance_std": 0.0028118088077429076,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 11
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volume_Ratio",
+      "importance_mean": 0.0027032150929637067,
+      "importance_std": 0.0017192677089017626,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 12
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Price_EMA20_Ratio",
+      "importance_mean": 0.0026633781445170035,
+      "importance_std": 0.0012980698335970024,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 13
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Bollinger_Position",
+      "importance_mean": 0.002257445023216731,
+      "importance_std": 0.0012059596647984066,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 14
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return_5D",
+      "importance_mean": 0.0019355822187960615,
+      "importance_std": 0.001995377671138042,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 15
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volatility_20",
+      "importance_mean": 0.001527450887502646,
+      "importance_std": 0.0019116256152476663,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 16
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return",
+      "importance_mean": 0.0014930780610388883,
+      "importance_std": 0.001844519777159006,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 17
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return_Lag5",
+      "importance_mean": 0.001306301989909464,
+      "importance_std": 0.0020805785856941126,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 18
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Price_MA10_Ratio",
+      "importance_mean": 0.0010382100936061288,
+      "importance_std": 0.0028027303343636507,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 19
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Williams_R_14",
+      "importance_mean": 0.0009796300403609904,
+      "importance_std": 0.00131316936797701,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 20
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return_Lag1",
+      "importance_mean": 0.0008525106967590679,
+      "importance_std": 0.0012818334605207936,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 21
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return_10D",
+      "importance_mean": 0.0006246236126155047,
+      "importance_std": 0.0021212941880426692,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 22
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Gap_Return",
+      "importance_mean": 0.00024470114751951044,
+      "importance_std": 0.002759780287169031,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 23
+    },
+    {
+      "model": "XGBoost",
+      "feature": "sentiment_score",
+      "importance_mean": 0.0001360019064313489,
+      "importance_std": 0.0008099102282615568,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 24
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volatility_10",
+      "importance_mean": 0.0001310671493039095,
+      "importance_std": 0.0035039956326862846,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 25
+    },
+    {
+      "model": "XGBoost",
+      "feature": "High_Low_Range",
+      "importance_mean": -0.00025728926433710164,
+      "importance_std": 0.0020709543738168254,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 26
+    },
+    {
+      "model": "XGBoost",
+      "feature": "ROC_20",
+      "importance_mean": -0.00032108221556592653,
+      "importance_std": 0.002596805737113283,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 27
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Candle_Body",
+      "importance_mean": -0.0005909595967208414,
+      "importance_std": 0.0019019395002203357,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 28
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volume_Change",
+      "importance_mean": -0.000737934608546309,
+      "importance_std": 0.0019430710932914618,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 29
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Bollinger_Width",
+      "importance_mean": -0.0008086003306107314,
+      "importance_std": 0.0038318470539746453,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 30
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volume_ROC_10",
+      "importance_mean": -0.0014050509661715505,
+      "importance_std": 0.0016656538127298572,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 31
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Price_MA5_Ratio",
+      "importance_mean": -0.0014425820371968933,
+      "importance_std": 0.0016773343640291674,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 32
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Volume_Ratio_20",
+      "importance_mean": -0.0014431831803378814,
+      "importance_std": 0.0024243331704436456,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 33
+    },
+    {
+      "model": "XGBoost",
+      "feature": "Return_3D",
+      "importance_mean": -0.002364663837166603,
+      "importance_std": 0.0017884803193497607,
+      "baseline_balanced_accuracy": 0.5216537142750501,
+      "importance_rank": 34
+    }
+  ]
+}

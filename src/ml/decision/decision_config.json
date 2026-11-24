@@ -1,0 +1,11 @@
+{
+    "spread_threshold": 0.1,
+    "probability_boundary": 0.5,
+    "minimum_validation_coverage": 0.2,
+    "ensemble_method": "equal_weight_average",
+    "decision_rule": {
+        "BUY": "Ensemble_BUY >= 0.50 and Spread >= threshold",
+        "SELL": "Ensemble_BUY < 0.50 and Spread >= threshold",
+        "HOLD": "Spread < threshold"
+    }
+}

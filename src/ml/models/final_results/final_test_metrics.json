@@ -1,0 +1,163 @@
+{
+    "configuration": {
+        "features": [
+            "Return",
+            "Return_3D",
+            "Return_5D",
+            "Return_10D",
+            "ROC_20",
+            "Price_MA5_Ratio",
+            "Price_MA10_Ratio",
+            "Price_EMA20_Ratio",
+            "Price_EMA50_Ratio",
+            "EMA5_EMA20_Ratio",
+            "EMA20_EMA50_Ratio",
+            "RSI",
+            "RSI_Lag1",
+            "Stochastic_K_14",
+            "Stochastic_D_3",
+            "Williams_R_14",
+            "ADX14",
+            "ATR14_Ratio",
+            "Volatility",
+            "Volatility_10",
+            "Volatility_20",
+            "Bollinger_Position",
+            "Bollinger_Width",
+            "High_Low_Range",
+            "Candle_Body",
+            "Gap_Return",
+            "Volume_Change",
+            "Volume_Ratio",
+            "Volume_Ratio_20",
+            "Volume_ROC_10",
+            "Return_Lag1",
+            "Return_Lag5",
+            "MACD_Hist_Lag1",
+            "sentiment_score"
+        ],
+        "number_of_features": 34,
+        "horizon_days": 5,
+        "sell_quantile": 0.3,
+        "buy_quantile": 0.7,
+        "train_ratio": 0.7,
+        "validation_ratio": 0.15,
+        "embargo_days": 5,
+        "sentiment_enabled": true,
+        "sentiment_feature": "sentiment_score",
+        "sentiment_source": "daily_sentiment_finbert.csv matched by date and ticker in processed_data_enhanced.csv",
+        "ensemble_weights": {
+            "Random Forest": 0.749990833671254,
+            "CatBoost": 0.13034862844037254,
+            "LightGBM": 0.09153498114583747,
+            "XGBoost": 0.028125556742536115
+        },
+        "probability_boundary": 0.5,
+        "spread_threshold": 0.02
+    },
+    "dataset": {
+        "train_rows": 39936,
+        "validation_rows": 8181,
+        "test_rows": 8640,
+        "train_model_rows": 39936,
+        "test_start": "2024-10-23",
+        "test_end": "2025-12-16"
+    },
+    "validation": {
+        "individual_models": {
+            "Random Forest": {
+                "Accuracy": 0.5115511551155115,
+                "Balanced_Accuracy": 0.5137138695027703,
+                "Macro_F1": 0.50979978299478,
+                "LogLoss": 0.695933849897627,
+                "ROC_AUC": 0.5235670841052489,
+                "Brier_Score": 0.25133247493326816
+            },
+            "CatBoost": {
+                "Accuracy": 0.5269526952695269,
+                "Balanced_Accuracy": 0.5290645530832722,
+                "Macro_F1": 0.5253795258422964,
+                "LogLoss": 0.7010986131919709,
+                "ROC_AUC": 0.5306832431439176,
+                "Brier_Score": 0.25361528716077597
+            },
+            "LightGBM": {
+                "Accuracy": 0.5192519251925193,
+                "Balanced_Accuracy": 0.5213325064474845,
+                "Macro_F1": 0.5177004672145271,
+                "LogLoss": 0.7023439403211424,
+                "ROC_AUC": 0.5278301759261851,
+                "Brier_Score": 0.25419582353310677
+            },
+            "XGBoost": {
+                "Accuracy": 0.5254858819215255,
+                "Balanced_Accuracy": 0.5273555121057667,
+                "Macro_F1": 0.5243316274041752,
+                "LogLoss": 0.7104442715644836,
+                "ROC_AUC": 0.5321900787096752,
+                "Brier_Score": 0.2575496435165405
+            }
+        },
+        "ensemble": {
+            "Accuracy": 0.514729250702848,
+            "Balanced_Accuracy": 0.5168804582899972,
+            "Macro_F1": 0.5130177233367863,
+            "LogLoss": 0.6961772002846119,
+            "ROC_AUC": 0.5264694988942555,
+            "Brier_Score": 0.25143465145278
+        }
+    },
+    "individual_models": {
+        "Random Forest": {
+            "Accuracy": 0.5090277777777777,
+            "Balanced_Accuracy": 0.5084675279242789,
+            "Macro_F1": 0.5072428851076645,
+            "LogLoss": 0.695939884474745,
+            "ROC_AUC": 0.5144942269388371,
+            "Brier_Score": 0.2513901809580921
+        },
+        "CatBoost": {
+            "Accuracy": 0.5078703703703704,
+            "Balanced_Accuracy": 0.5070930712119485,
+            "Macro_F1": 0.5045811699072029,
+            "LogLoss": 0.7058084635185933,
+            "ROC_AUC": 0.5111800006687937,
+            "Brier_Score": 0.2559224115942726
+        },
+        "LightGBM": {
+            "Accuracy": 0.5086805555555556,
+            "Balanced_Accuracy": 0.5079540358696333,
+            "Macro_F1": 0.5057879530261938,
+            "LogLoss": 0.7068606913065392,
+            "ROC_AUC": 0.5068672997627497,
+            "Brier_Score": 0.2564302840609259
+        },
+        "XGBoost": {
+            "Accuracy": 0.5002314814814814,
+            "Balanced_Accuracy": 0.49960429708500276,
+            "Macro_F1": 0.49800037202380953,
+            "LogLoss": 0.7185736298561096,
+            "ROC_AUC": 0.5041027114867025,
+            "Brier_Score": 0.2616118788719177
+        }
+    },
+    "ensemble": {
+        "Accuracy": 0.5107638888888889,
+        "Balanced_Accuracy": 0.5100871017998266,
+        "Macro_F1": 0.5082397851336322,
+        "LogLoss": 0.6972398553815115,
+        "ROC_AUC": 0.5126959865521028,
+        "Brier_Score": 0.25202525567227224
+    },
+    "decision_engine": {
+        "Coverage": 0.8751157407407407,
+        "HOLD_Rate": 0.12488425925925928,
+        "Trade_Count": 7561,
+        "Accuracy": 0.5099854516598333,
+        "Balanced_Accuracy": 0.5096351605114906,
+        "Macro_F1": 0.5069834770021256,
+        "BUY_Count": 3208,
+        "SELL_Count": 4353,
+        "HOLD_Count": 1079
+    }
+}

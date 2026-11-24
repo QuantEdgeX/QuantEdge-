@@ -31,7 +31,9 @@ def run():
         start="2023-01-01"
     )
 
-    df.columns = df.columns.get_level_values(0)
+    # Remove multi-index if present
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
     # Technical indicators
     df['Return'] = df['Close'].pct_change()
@@ -43,10 +45,6 @@ def run():
     df['RSI'] = calculate_rsi(df['Close'])
 
     df['Volatility'] = df['Return'].rolling(window=5).std()
-
-    if df.empty:
-        print("No valid data after preprocessing.")
-        return
 
     # Real-time sentiment
     sentiment_data = get_live_sentiment(ticker)
@@ -71,6 +69,10 @@ def run():
     # Remove NaN rows
     df.dropna(inplace=True)
 
+    if df.empty:
+        print("No valid data after preprocessing.")
+        return
+
     # Latest row
     latest = df.iloc[-1]
 
@@ -91,6 +93,10 @@ def run():
 
     # Prediction
     pred = model.predict(features)[0]
+
+    # Confidence
+    probabilities = model.predict_proba(features)[0]
+    confidence = max(probabilities) * 100
 
     # Decode prediction
     if pred == 1:
@@ -124,6 +130,7 @@ def run():
     print("\nAI Trading Decision:")
 
     print(f"Prediction: {decision}")
+    print(f"Confidence: {confidence:.2f}%")
 
 
 if __name__ == "__main__":
