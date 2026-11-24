@@ -1,0 +1,15 @@
+# Dependencies for the LLM sentiment pipeline (src/sentiment).
+# Kept separate from requirements.txt on purpose (that file is UTF-16 and pins many
+# unrelated packages). All of these are already compatible with your pinned stack.
+pandas>=2.0
+numpy>=1.26
+scipy>=1.11            # only used by your existing code, not by src/sentiment
+python-dotenv>=1.0     # optional: loads .env automatically
+google-genai>=1.0      # Gemini SDK (NOT the retired google-generativeai package)
+datasets>=2.19         # Hugging Face streaming of the news corpus
+huggingface_hub>=0.23
+pyarrow>=14
+
+# Only needed for the FinBERT baseline arm (`finbert` command):
+torch>=2.1
+transformers>=4.40

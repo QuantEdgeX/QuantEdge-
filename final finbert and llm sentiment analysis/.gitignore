@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+venv/
+lstm_venv/
+.env
+.venv/
+
+
+
+# Data files
+data/*.csv
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Navya files
+toremember.txt
+*.pkl
+
+# Trained ML models
+*.keras
+
+# LLM sentiment pipeline: cache, raw news, logs
+src/data/sentiment/
